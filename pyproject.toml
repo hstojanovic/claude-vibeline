@@ -1,0 +1,134 @@
+[build-system]
+requires = ["uv-build==0.10.9"]
+build-backend = "uv_build"
+
+[project]
+name = "claude-vibeline"
+description = "Claude Code statusline with real subscription usage data"
+version = "1.0.0"
+requires-python = ">=3.14"
+authors = [{name = "Hrvoje Stojanović"}]
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Utilities",
+    "Typing :: Typed",
+]
+dependencies = [
+    "cappa==0.31.0",
+    "platformdirs==4.9.4",
+    "requests==2.32.5",
+]
+
+[dependency-groups]
+dev = [
+    "freezegun==1.5.5",
+    "pytest==9.0.2",
+    "pytest-cov==7.0.0",
+    "responses==0.26.0",
+    "ruff==0.15.5",
+    "ty==0.0.21",
+    "types-requests>=2.32.4,<2.32.6",
+]
+
+[project.scripts]
+claude-vibeline = "claude_vibeline:main"
+
+[project.urls]
+Homepage = "https://github.com/hstojanovic/claude-vibeline"
+Source = "https://github.com/hstojanovic/claude-vibeline"
+Changelog = "https://github.com/hstojanovic/claude-vibeline/blob/master/CHANGELOG.md"
+Issues = "https://github.com/hstojanovic/claude-vibeline/issues"
+
+[tool.ruff]
+target-version = "py314"
+line-length = 120
+preview = true
+show-fixes = true
+
+[tool.ruff.format]
+docstring-code-format = true
+preview = true
+quote-style = "single"
+skip-magic-trailing-comma = true
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "ANN401",   # Allow typing.Any.
+    "COM812",   # Trailing commas handled by formatter.
+    "COM818",   # Allow trailing comma in bare tuples.
+    "CPY001",   # No copyright header required.
+    "D1",       # No docstrings required.
+    "D200",     # Allow multi-line one-liner docstrings.
+    "D202",     # Allow blank lines after docstring.
+    "D203",     # No blank line before class docstring (conflicts with D211).
+    "D212",     # Summary on second line (conflicts with D213).
+    "DOC",      # No docstring parameter/return docs required.
+    "ERA001",   # Bug: flags TODO blocks as commented-out code.
+    "FIX002",   # Allow TODO comments.
+    "PLR2004",  # Allow unnamed numerical constants.
+    "S311",     # Allow random module.
+    "S404",     # Allow subprocess module.
+    "S603",     # Allow subprocess with shell=False.
+    "TD002",    # No author required on TODOs.
+    "TD003",    # No issue link required on TODOs.
+]
+
+[tool.ruff.lint.flake8-builtins]
+strict-checking = true
+
+[tool.ruff.lint.flake8-import-conventions.extend-aliases]
+"concurrent.futures" = "cf"
+"multiprocessing" = "mp"
+"subprocess" = "sp"
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = "single"
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.flake8-type-checking]
+strict = true
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+split-on-trailing-comma = false
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = [
+    "C901",     # Allow complex functions.
+    "PLR0912",  # Allow many branches.
+    "PLR0914",  # Allow many local variables.
+    "T201",     # Allow print statements.
+]
+"tests/*" = [
+    "INP001",   # No __init__.py needed (not a package).
+    "PLC2701",  # Allow private name imports (testing internals).
+    "PLR6301",  # Allow methods that don't use self (test organization).
+    "S101",     # Allow assert statements.
+    "TC003",    # Keep stdlib imports at runtime (pytest evaluates annotations via __annotate__).
+]
+
+[tool.ruff.lint.pycodestyle]
+ignore-overlong-task-comments = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["claude_vibeline"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 90

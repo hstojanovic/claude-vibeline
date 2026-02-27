@@ -1,0 +1,5 @@
+*.pyc
+/.claude/*.local.*
+/.coverage
+/coverage.xml
+/uv.lock
