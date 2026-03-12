@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v7
-      - run: uv run python scripts/check_release.py "$GITHUB_REF_NAME"
+      - run: uv run --no-project python scripts/check_release.py "$GITHUB_REF_NAME"
 
   publish:
     needs: [check, validate]
