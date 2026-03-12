@@ -15,7 +15,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v7
-      - run: uvx pip-audit
+      - run: uv export --all-groups --all-extras --no-hashes --no-emit-project | uvx pip-audit -r /dev/stdin
+      - run: uvx pip-audit uv-build
       - uses: github/codeql-action/init@v4
         with:
           languages: python
