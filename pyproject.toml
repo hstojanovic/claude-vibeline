@@ -80,6 +80,7 @@ ignore = [
     "S311",     # Allow random module.
     "S404",     # Allow subprocess module.
     "S603",     # Allow subprocess with shell=False.
+    "T201",     # Allow print statements.
     "TD002",    # No author required on TODOs.
     "TD003",    # No issue link required on TODOs.
 ]

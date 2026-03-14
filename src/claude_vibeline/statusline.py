@@ -309,7 +309,7 @@ def usage_parts(args: Args, usage: UsageData | None = None, stale_ts: float | No
 
     parts: list[str] = []
 
-    buckets: list[tuple[bool, str, str]] = [
+    buckets = [
         (args.session, 'five_hour', 'sess'),
         (args.weekly, 'seven_day', 'week'),
         (args.opus, 'seven_day_opus', 'opus'),
@@ -521,7 +521,7 @@ def main() -> None:
         parts.extend(usage_parts(args, usage, stale_ts))
 
     output = wrap_parts(parts, args.columns)
-    print(output)  # noqa: T201
+    print(output)
 
     if args.debug:
         effort = read_effort()
