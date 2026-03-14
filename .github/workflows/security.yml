@@ -7,10 +7,14 @@ on:
   schedule:
     - cron: '0 6 * * 6'
 
+permissions:
+  contents: read
+
 jobs:
   analyze:
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       security-events: write
     steps:
       - uses: actions/checkout@v6
