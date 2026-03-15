@@ -116,6 +116,7 @@ split-on-trailing-comma = false
 "tests/*" = [
     "INP001",   # No __init__.py needed (not a package).
     "PLC2701",  # Allow private name imports (testing internals).
+    "PLR0904",  # Allow many public methods (large test classes).
     "PLR6301",  # Allow methods that don't use self (test organization).
     "S101",     # Allow assert statements.
     "TC003",    # Keep stdlib imports at runtime (pytest evaluates annotations via __annotate__).

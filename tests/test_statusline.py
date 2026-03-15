@@ -35,6 +35,7 @@ from claude_vibeline.statusline import (
     debug_log_path,
     extra_section,
     fetch_usage,
+    format_context_size,
     format_countdown,
     has_cache_gap,
     is_past,
@@ -893,6 +894,20 @@ class TestFetchUsage:
         assert isinstance(stale_ts, float)
 
 
+class TestFormatContextSize:
+    def test_200k(self) -> None:
+        assert format_context_size(200_000) == '200k'
+
+    def test_1m(self) -> None:
+        assert format_context_size(1_000_000) == '1M'
+
+    def test_128k(self) -> None:
+        assert format_context_size(128_000) == '128k'
+
+    def test_1_5m(self) -> None:
+        assert format_context_size(1_500_000) == '1.5M'
+
+
 class TestVisibleLen:
     def test_plain_text(self) -> None:
         assert visible_len('hello') == 5
@@ -1035,6 +1050,26 @@ class TestMain:
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
             output = run_main(stdin_data=data)
         assert 'Unknown' in output
+
+    def test_context_window_size_shown(self) -> None:
+        data = {**STDIN_DATA, 'context_window': {'used_percentage': 42.3, 'context_window_size': 200_000}}
+        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
+            output = run_main(stdin_data=data)
+        assert '200k' in output
+        assert '42%' in output
+
+    def test_context_window_size_1m(self) -> None:
+        data = {**STDIN_DATA, 'context_window': {'used_percentage': 10.0, 'context_window_size': 1_000_000}}
+        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
+            output = run_main(stdin_data=data)
+        assert '1M' in output
+
+    def test_context_window_size_absent(self) -> None:
+        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
+            output = run_main()
+        assert '200k' not in output
+        assert '1M' not in output
+        assert '42%' in output
 
     def test_no_context_flag(self) -> None:
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):

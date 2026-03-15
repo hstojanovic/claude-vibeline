@@ -19,6 +19,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Add effort invalidation after session resume (detected via `<synthetic>` transcript entries)
 - Add per-model supported effort levels (Opus: low/medium/high/max, Sonnet: low/medium/high)
 - Add automatic cleanup of session cache files older than 30 days
+- Add context window size display (e.g. `200k`, `1M`) from stdin `context_window_size` field
 
 ### Fixed
 

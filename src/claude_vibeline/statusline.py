@@ -87,6 +87,7 @@ class Model(TypedDict, total=False):
 
 class ContextWindow(TypedDict, total=False):
     used_percentage: float
+    context_window_size: int
 
 
 class StdinData(TypedDict, total=False):
@@ -597,6 +598,18 @@ def prompt_cache_section(transcript_path: str | None) -> str | None:
     return f'{LABEL}cache{RESET} {GREEN}\u25cf{RESET} {PERC}{hh_mm}{RESET}'
 
 
+# --- Context window ---
+
+
+def format_context_size(tokens: int) -> str:
+    """
+    Format token count as human-readable size (e.g. 200_000 → "200k", 1_000_000 → "1M").
+    """
+    if tokens >= 1_000_000:
+        return f'{tokens / 1_000_000:g}M'
+    return f'{tokens / 1_000:g}k'
+
+
 # --- Layout ---
 
 
@@ -710,7 +723,9 @@ def main() -> None:
             parts.append(section)
 
     if args.context:
-        parts.append(f'{LABEL}ctx{RESET} {bar(used_perc, args.bar_width)} {PERC}{used_perc}%{RESET}')
+        ctx_window = data.get('context_window', {}).get('context_window_size')
+        ctx_size = f' {DIM}{format_context_size(ctx_window)}{RESET}' if isinstance(ctx_window, int) else ''
+        parts.append(f'{LABEL}ctx{RESET}{ctx_size} {bar(used_perc, args.bar_width)} {PERC}{used_perc}%{RESET}')
 
     usage: UsageData | None = None
     stale_ts: float | None = None
