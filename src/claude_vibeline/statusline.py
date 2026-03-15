@@ -39,6 +39,12 @@ USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 CACHE_TTL_SECONDS = 60
 PROMPT_CACHE_TTL = 300  # 5-minute prompt cache TTL
 DEBUG_LOG_MAX_BYTES = 1_000_000
+EFFORT_LEVELS = r'low|medium|high|max'
+MODEL_EFFORT_RE = re.compile(rf'with ({EFFORT_LEVELS}) effort')
+EFFORT_COMMAND_RE = re.compile(rf'Set effort level to ({EFFORT_LEVELS})')
+SET_MODEL_PREFIX = 'Set model to'
+SET_EFFORT_PREFIX = 'Set effort level to'
+EFFORT_AUTO_PREFIX = 'Effort level set to auto'
 
 
 class UsageBucket(TypedDict, total=False):
@@ -88,6 +94,7 @@ class StdinData(TypedDict, total=False):
     model: Model
     context_window: ContextWindow
     transcript_path: str
+    session_id: str
 
 
 @dataclasses.dataclass
@@ -140,12 +147,180 @@ def bar(perc: int, width: int) -> str:
     return f'{ORANGE}{FILL * filled}{BAR_EMPTY}{EMPTY * empty}{RESET}'
 
 
-def read_effort() -> str:
+# --- Effort resolution (not in stdin, parsed from transcript) ---
+
+SUPPORTED_EFFORTS: dict[str, set[str]] = {'opus': {'low', 'medium', 'high', 'max'}, 'sonnet': {'low', 'medium', 'high'}}
+
+
+def read_settings_effort() -> str:
     try:
         settings = Path('~/.claude/settings.json').expanduser()
-        return json.loads(settings.read_text()).get('effortLevel', 'default')
+        return json.loads(settings.read_text()).get('effortLevel', 'medium')
     except OSError, json.JSONDecodeError:
-        return 'default'
+        return 'medium'
+
+
+def parse_effort_from_line(visible: str) -> str | None:
+    """
+    Extract effort from a visible (ANSI-stripped) transcript line.
+
+    Matches three formats:
+      /model:  "Set model to ... with {effort} effort"
+      /effort: "Set effort level to {effort}"
+      /effort auto: "Effort level set to auto" → returns 'auto'
+    """
+    if SET_MODEL_PREFIX in visible:
+        match = MODEL_EFFORT_RE.search(visible)
+        return match.group(1) if match is not None else None
+    if SET_EFFORT_PREFIX in visible:
+        match = EFFORT_COMMAND_RE.search(visible)
+        if match is not None:
+            return match.group(1)
+    if EFFORT_AUTO_PREFIX in visible:
+        return 'auto'
+    return None
+
+
+class SessionCache(TypedDict, total=False):
+    effort: str
+    ts: str
+
+
+def session_cache_dir() -> Path:
+    return Path(platformdirs.user_cache_dir('claude-vibeline')) / 'sessions'
+
+
+def read_session_cache(session_id: str) -> SessionCache:
+    try:
+        cache_file = session_cache_dir() / f'{session_id}.json'
+        data = json.loads(cache_file.read_text())
+    except OSError, json.JSONDecodeError:
+        return {}
+    if data.get('_v') != app_version:
+        return {}
+    return data
+
+
+def write_session_cache(session_id: str, data: SessionCache) -> None:
+    cache_dir = session_cache_dir()
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = cache_dir / f'{session_id}.json'
+        cache_file.write_text(json.dumps({**data, '_v': app_version}))
+        cleanup_session_cache(cache_dir)
+    except OSError:
+        pass
+
+
+CACHE_MAX_AGE = 30 * 86400  # 30 days
+
+
+def cleanup_session_cache(cache_dir: Path) -> None:
+    try:
+        cutoff = time.time() - CACHE_MAX_AGE
+        for f in cache_dir.iterdir():
+            if f.is_file() and f.stat().st_mtime < cutoff:
+                f.unlink()
+    except OSError:
+        pass
+
+
+class _EffortScanner:
+    def __init__(self, since_ts: str) -> None:
+        self.since_ts = since_ts
+        self.saw_synthetic: bool = False
+        self.latest_ts: str = ''
+        self.effort: str | None = None
+        self.done: bool = False
+
+    def process_entry(self, entry: dict[str, Any]) -> None:
+        ts = entry.get('timestamp', '')
+        if ts and self.since_ts and ts <= self.since_ts:
+            self.done = True
+            return
+        if ts and ts > self.latest_ts:
+            self.latest_ts = ts
+
+        msg = entry.get('message', {})
+        if msg.get('model') == '<synthetic>':
+            content = msg.get('content', [])
+            if isinstance(content, list) and any(
+                b.get('text') == 'No response requested.' for b in content if isinstance(b, dict)
+            ):
+                self.saw_synthetic = True
+            return
+
+        content = msg.get('content', '')
+        if not isinstance(content, str):
+            return
+        visible = ANSI_RE.sub('', content)
+        effort = parse_effort_from_line(visible)
+        if effort is not None:
+            self.effort = None if self.saw_synthetic else ('medium' if effort == 'auto' else effort)
+            self.done = True
+
+
+def scan_transcript_effort(transcript_path: str | None, since_ts: str = '') -> tuple[str | None, str, bool]:
+    """
+    Scan transcript backwards for the last effort-setting command.
+
+    Returns (effort_or_none, latest_timestamp, saw_synthetic).
+    Effort is invalidated if a <synthetic> "No response requested." entry
+    appears more recently (indicates session resume/exit).
+    """
+    if transcript_path is None:
+        return None, '', False
+    scanner = _EffortScanner(since_ts)
+    try:
+        with Path(transcript_path).open('rb') as f:
+            f.seek(0, 2)
+            size = f.tell()
+            if size == 0:
+                return None, '', False
+            read_total = 0
+            while read_total < size:
+                read_total = min(size, read_total + TAIL_CHUNK)
+                f.seek(-read_total, 2)
+                tail = f.read(read_total).decode('utf-8', errors='replace')
+                for line in reversed(tail.splitlines()):
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    scanner.process_entry(entry)
+                    if scanner.done:
+                        return scanner.effort, scanner.latest_ts, scanner.saw_synthetic
+    except OSError:
+        pass
+    return scanner.effort, scanner.latest_ts, scanner.saw_synthetic
+
+
+def resolve_effort(transcript_path: str | None, session_id: str | None) -> str | None:
+    """
+    Resolve effort: transcript → session cache → None.
+
+    Returns None when effort is unknown.
+    """
+    cached = read_session_cache(session_id) if session_id is not None else {}
+    effort, latest_ts, saw_synthetic = scan_transcript_effort(transcript_path, cached.get('ts', ''))
+
+    if effort is not None:
+        if session_id is not None:
+            write_session_cache(session_id, {'effort': effort, 'ts': latest_ts})
+        return effort
+
+    if session_id is not None and latest_ts:
+        update: SessionCache = {'ts': latest_ts}
+        if saw_synthetic:
+            cached.pop('effort', None)
+        if 'effort' in cached:
+            update['effort'] = cached['effort']
+        write_session_cache(session_id, update)
+
+    return cached.get('effort')
+
+
+# --- OAuth / Usage API ---
 
 
 def token_from_entry(entry: OAuthEntry) -> str | None:
@@ -209,7 +384,7 @@ def fetch_usage() -> tuple[UsageData | None, float | None]:
 
     token = read_oauth_token()
     if token is None:
-        write_cache(cache, stale)
+        write_usage_cache(cache, stale)
         return stale, stale_ts if stale is not None else None
 
     try:
@@ -219,15 +394,15 @@ def fetch_usage() -> tuple[UsageData | None, float | None]:
         resp.raise_for_status()
         data: UsageData = resp.json()
     except requests.RequestException, json.JSONDecodeError:
-        write_cache(cache, stale)
+        write_usage_cache(cache, stale)
         return stale, stale_ts if stale is not None else None
 
-    write_cache(cache, data)
+    write_usage_cache(cache, data)
     return data, None
 
 
-def write_cache(cache: Path, data: UsageData | None) -> None:
-    payload: dict[str, Any] = {**(data or {}), '_ts': time.time()}
+def write_usage_cache(cache: Path, data: UsageData | None) -> None:
+    payload: dict[str, Any] = {**(data or {}), '_ts': time.time(), '_v': app_version}
     try:
         cache.parent.mkdir(parents=True, exist_ok=True)
         tmp = cache.with_suffix(f'.{os.getpid()}.tmp')
@@ -235,6 +410,9 @@ def write_cache(cache: Path, data: UsageData | None) -> None:
         tmp.replace(cache)
     except OSError:
         pass
+
+
+# --- Display formatting ---
 
 
 def format_countdown(resets_at_iso: str) -> str:
@@ -333,6 +511,9 @@ def usage_parts(args: Args, usage: UsageData | None = None, stale_ts: float | No
     return parts
 
 
+# --- Prompt cache ---
+
+
 TAIL_CHUNK = 16384
 
 
@@ -416,6 +597,9 @@ def prompt_cache_section(transcript_path: str | None) -> str | None:
     return f'{LABEL}cache{RESET} {GREEN}\u25cf{RESET} {PERC}{hh_mm}{RESET}'
 
 
+# --- Layout ---
+
+
 def visible_len(s: str) -> int:
     return len(ANSI_RE.sub('', s))
 
@@ -440,15 +624,24 @@ def wrap_parts(parts: list[str], columns: int) -> str:
     return '\n'.join(lines)
 
 
-def model_section(data: StdinData) -> str:
-    model_name = data.get('model', {}).get('display_name') or 'Unknown'
-    is_haiku = 'haiku' in model_name.lower()
-    effort = read_effort() if not is_haiku else None
-    if effort == 'default':
-        effort = 'high'
-    if effort:
+def model_family(model_name: str) -> str:
+    return model_name.split(maxsplit=1)[0].lower() if model_name else ''
+
+
+def model_section(model_name: str, effort: str | None) -> str:
+    family = model_family(model_name)
+    supported = SUPPORTED_EFFORTS.get(family)
+    if supported is None:
+        return f'{ORANGE}{model_name}{RESET}'
+    if effort is not None and effort in supported:
         return f'{ORANGE}{model_name}{RESET} {GOLD}({effort}){RESET}'
-    return f'{ORANGE}{model_name}{RESET}'
+    fallback = read_settings_effort()
+    if fallback not in supported:
+        fallback = 'medium'
+    return f'{ORANGE}{model_name}{RESET} {GOLD}({fallback}?){RESET}'
+
+
+# --- Debug logging ---
 
 
 def write_debug_log(  # noqa: PLR0913, PLR0917
@@ -468,19 +661,23 @@ def write_debug_log(  # noqa: PLR0913, PLR0917
         transcript = stdin_data.get('transcript_path', '') if stdin_data is not None else ''
         session_id = Path(transcript).stem if transcript else None
         entry: dict[str, Any] = {
+            'v': app_version,
             'ts': datetime.now().astimezone().strftime('%Y-%m-%dT%H:%M:%S'),
             'session': session_id,
             'output': ANSI_RE.sub('', output).replace(NBSP, ' '),
             'args': dataclasses.asdict(args),
             'stdin': dict(stdin_data) if stdin_data is not None else None,
+            'effort': effort,
             'usage': dict(usage_data) if usage_data is not None else None,
             'stale_ts': stale_ts,
-            'effort_from_settings': effort,
         }
         with log.open('a', encoding='utf-8') as f:
             f.write(json.dumps(entry) + '\n')
     except OSError:
         pass
+
+
+# --- Main ---
 
 
 def main() -> None:
@@ -494,9 +691,10 @@ def main() -> None:
     except json.JSONDecodeError:
         return
 
-    project_dir = data.get('workspace', {}).get('project_dir', '')
-    project_name = Path(project_dir).name
+    project_name = Path(data.get('workspace', {}).get('project_dir', '')).name
+    model_name = data.get('model', {}).get('display_name') or 'Unknown'
     used_perc = round(data.get('context_window', {}).get('used_percentage', 0))
+    effort = resolve_effort(data.get('transcript_path'), data.get('session_id'))
 
     parts: list[str] = []
 
@@ -504,7 +702,7 @@ def main() -> None:
         parts.append(f'{CREAM}{project_name}{RESET}')
 
     if args.model:
-        parts.append(model_section(data))
+        parts.append(model_section(model_name, effort))
 
     if args.cache:
         section = prompt_cache_section(data.get('transcript_path'))
@@ -524,5 +722,4 @@ def main() -> None:
     print(output)
 
     if args.debug:
-        effort = read_effort()
         write_debug_log(output, args, stdin_data=data, usage_data=usage, stale_ts=stale_ts, effort=effort)

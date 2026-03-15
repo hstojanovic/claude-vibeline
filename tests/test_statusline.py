@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import runpy
 import subprocess as sp
 import time
@@ -11,6 +12,7 @@ from unittest import mock
 import responses
 from freezegun import freeze_time
 
+from claude_vibeline import __version__ as app_version
 from claude_vibeline.statusline import (
     ANSI_RE,
     CACHE_TTL_SECONDS,
@@ -26,8 +28,10 @@ from claude_vibeline.statusline import (
     TAIL_CHUNK,
     USAGE_URL,
     Args,
+    _EffortScanner,
     bar,
     cache_path,
+    cleanup_session_cache,
     debug_log_path,
     extra_section,
     fetch_usage,
@@ -36,19 +40,25 @@ from claude_vibeline.statusline import (
     is_past,
     main,
     model_section,
+    parse_effort_from_line,
     prompt_cache_section,
-    read_effort,
     read_last_user_timestamp,
     read_last_user_timestamps,
     read_oauth_token,
+    read_session_cache,
+    read_settings_effort,
     read_user_timestamps,
+    resolve_effort,
+    scan_transcript_effort,
+    session_cache_dir,
     token_from_entry,
     usage_parts,
     usage_section,
     visible_len,
     wrap_parts,
-    write_cache,
     write_debug_log,
+    write_session_cache,
+    write_usage_cache,
 )
 
 if TYPE_CHECKING:
@@ -169,13 +179,11 @@ class TestExtraSection:
         extra: ExtraUsage = {'is_enabled': True, 'used_credits': 100, 'monthly_limit': 2000}
         result = extra_section(extra, '$')
         assert result is not None
-        # Should show countdown to March 1st
         assert '13d' in result
 
     @freeze_time('2026-03-15T12:00:00Z')
     def test_stale_same_month(self) -> None:
         extra: ExtraUsage = {'is_enabled': True, 'used_credits': 250, 'monthly_limit': 2000}
-        # Cached 2 minutes ago, same month
         stale_ts = time.time() - 120
         result = extra_section(extra, '$', stale_ts=stale_ts)
         assert result is not None
@@ -186,7 +194,6 @@ class TestExtraSection:
     @freeze_time('2026-03-01T00:30:00Z')
     def test_stale_previous_month(self) -> None:
         extra: ExtraUsage = {'is_enabled': True, 'used_credits': 250, 'monthly_limit': 2000}
-        # Cached in February
         stale_ts = time.time() - 3600
         result = extra_section(extra, '$', stale_ts=stale_ts)
         assert result is not None
@@ -222,7 +229,6 @@ class TestFormatCountdown:
         result = format_countdown('2026-02-24T13:45:00+00:00')
         assert '3h' in result
         assert '45m' in result
-        # No days component
         assert 'd' not in result
 
     @freeze_time('2026-02-24T10:00:00Z')
@@ -235,23 +241,432 @@ class TestFormatCountdown:
         assert not result
 
 
-class TestReadEffort:
+def transcript_line(content: str) -> str:
+    return json.dumps({'type': 'user', 'message': {'content': content}})
+
+
+class TestParseEffortFromLine:
+    def test_model_command_low(self) -> None:
+        assert parse_effort_from_line('Set model to Sonnet 4.6 with low effort') == 'low'
+
+    def test_model_command_medium(self) -> None:
+        assert parse_effort_from_line('Set model to Sonnet 4.6 with medium effort') == 'medium'
+
+    def test_model_command_high(self) -> None:
+        assert parse_effort_from_line('Set model to Opus 4.6 (1M context) (default) with high effort') == 'high'
+
+    def test_model_command_max(self) -> None:
+        assert parse_effort_from_line('Set model to Opus 4.6 with max effort') == 'max'
+
+    def test_model_command_no_effort(self) -> None:
+        assert parse_effort_from_line('Set model to Sonnet 4.6') is None
+
+    def test_effort_command_low(self) -> None:
+        assert parse_effort_from_line('Set effort level to low') == 'low'
+
+    def test_effort_command_medium(self) -> None:
+        assert parse_effort_from_line('Set effort level to medium') == 'medium'
+
+    def test_effort_command_high(self) -> None:
+        assert parse_effort_from_line('Set effort level to high') == 'high'
+
+    def test_effort_command_max(self) -> None:
+        assert parse_effort_from_line('Set effort level to max') == 'max'
+
+    def test_effort_auto(self) -> None:
+        assert parse_effort_from_line('Effort level set to auto') == 'auto'
+
+    def test_unrelated_text(self) -> None:
+        assert parse_effort_from_line('hello world') is None
+
+
+class TestEffortScanner:
+    def test_effort_from_content(self) -> None:
+        scanner = _EffortScanner('')
+        scanner.process_entry({
+            'message': {'content': '<local-command-stdout>Set effort level to high</local-command-stdout>'}
+        })
+        assert scanner.effort == 'high'
+        assert scanner.done
+
+    def test_auto_effort_becomes_medium(self) -> None:
+        scanner = _EffortScanner('')
+        scanner.process_entry({
+            'message': {'content': '<local-command-stdout>Effort level set to auto</local-command-stdout>'}
+        })
+        assert scanner.effort == 'medium'
+        assert scanner.done
+
+    def test_synthetic_before_effort_invalidates(self) -> None:
+        scanner = _EffortScanner('')
+        scanner.process_entry({
+            'message': {'model': '<synthetic>', 'content': [{'type': 'text', 'text': 'No response requested.'}]}
+        })
+        assert scanner.saw_synthetic
+        scanner.process_entry({
+            'message': {'content': '<local-command-stdout>Set effort level to high</local-command-stdout>'}
+        })
+        assert scanner.effort is None
+        assert scanner.done
+
+    def test_api_error_synthetic_does_not_set_flag(self) -> None:
+        scanner = _EffortScanner('')
+        scanner.process_entry({
+            'message': {'model': '<synthetic>', 'content': [{'type': 'text', 'text': 'API Error: 400'}]}
+        })
+        assert not scanner.saw_synthetic
+
+    def test_since_ts_skips_old_entries(self) -> None:
+        scanner = _EffortScanner('2026-03-15T10:00:00Z')
+        scanner.process_entry({
+            'timestamp': '2026-03-15T09:00:00Z',
+            'message': {'content': '<local-command-stdout>Set effort level to max</local-command-stdout>'},
+        })
+        assert scanner.done
+        assert scanner.effort is None
+
+    def test_since_ts_processes_new_entries(self) -> None:
+        scanner = _EffortScanner('2026-03-15T10:00:00Z')
+        scanner.process_entry({
+            'timestamp': '2026-03-15T11:00:00Z',
+            'message': {'content': '<local-command-stdout>Set effort level to max</local-command-stdout>'},
+        })
+        assert scanner.effort == 'max'
+
+    def test_latest_ts_tracked(self) -> None:
+        scanner = _EffortScanner('')
+        scanner.process_entry({'timestamp': '2026-03-15T10:00:00Z', 'message': {'content': 'hello'}})
+        scanner.process_entry({'timestamp': '2026-03-15T09:00:00Z', 'message': {'content': 'world'}})
+        assert scanner.latest_ts == '2026-03-15T10:00:00Z'
+
+    def test_non_string_content_ignored(self) -> None:
+        scanner = _EffortScanner('')
+        scanner.process_entry({'message': {'content': [{'type': 'tool_result'}]}})
+        assert scanner.effort is None
+        assert not scanner.done
+
+    def test_initial_state(self) -> None:
+        scanner = _EffortScanner('')
+        assert scanner.effort is None
+        assert not scanner.saw_synthetic
+        assert not scanner.done
+        assert not scanner.latest_ts
+
+    def test_synthetic_non_list_content(self) -> None:
+        scanner = _EffortScanner('')
+        scanner.process_entry({'message': {'model': '<synthetic>', 'content': 'plain text'}})
+        assert not scanner.saw_synthetic
+
+    def test_synthetic_with_non_matching_text(self) -> None:
+        scanner = _EffortScanner('')
+        scanner.process_entry({
+            'message': {'model': '<synthetic>', 'content': [{'type': 'text', 'text': 'Something else'}]}
+        })
+        assert not scanner.saw_synthetic
+
+    def test_synthetic_with_non_dict_blocks(self) -> None:
+        scanner = _EffortScanner('')
+        scanner.process_entry({'message': {'model': '<synthetic>', 'content': ['not a dict', 42]}})
+        assert not scanner.saw_synthetic
+
+
+class TestScanTranscriptEffort:
+    def test_effort_command(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        content = '<local-command-stdout>Set effort level to high</local-command-stdout>'
+        transcript.write_text(transcript_line(content) + '\n')
+        effort, _, _ = scan_transcript_effort(str(transcript))
+        assert effort == 'high'
+
+    def test_model_command_with_effort(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        content = (
+            '<local-command-stdout>Set model to Opus 4.6 (1M context) (default) with max effort</local-command-stdout>'
+        )
+        transcript.write_text(transcript_line(content) + '\n')
+        effort, _, _ = scan_transcript_effort(str(transcript))
+        assert effort == 'max'
+
+    def test_effort_auto_returns_medium(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        content = '<local-command-stdout>Effort level set to auto</local-command-stdout>'
+        transcript.write_text(transcript_line(content) + '\n')
+        effort, _, _ = scan_transcript_effort(str(transcript))
+        assert effort == 'medium'
+
+    def test_ansi_codes_stripped(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        content = (
+            '<local-command-stdout>'
+            'Set model to \033[1mOpus 4.6\033[0m with \033[1mhigh\033[0m effort'
+            '</local-command-stdout>'
+        )
+        transcript.write_text(transcript_line(content) + '\n')
+        effort, _, _ = scan_transcript_effort(str(transcript))
+        assert effort == 'high'
+
+    def test_no_effort_command(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        transcript.write_text(transcript_line('hello') + '\n')
+        effort, _, _ = scan_transcript_effort(str(transcript))
+        assert effort is None
+
+    def test_none_path(self) -> None:
+        effort, ts, _ = scan_transcript_effort(None)
+        assert effort is None
+        assert not ts
+
+    def test_empty_file(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        transcript.write_text('')
+        effort, ts, _ = scan_transcript_effort(str(transcript))
+        assert effort is None
+        assert not ts
+
+    def test_missing_file(self, tmp_path: Path) -> None:
+        effort, _, _ = scan_transcript_effort(str(tmp_path / 'missing.jsonl'))
+        assert effort is None
+
+    def test_uses_last_command(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+
+        def effort_msg(level: str) -> str:
+            content = f'<local-command-stdout>Set effort level to {level}</local-command-stdout>'
+            return transcript_line(content)
+
+        lines = [effort_msg('max'), transcript_line('do something'), effort_msg('high')]
+        transcript.write_text('\n'.join(lines) + '\n')
+        effort, _, _ = scan_transcript_effort(str(transcript))
+        assert effort == 'high'
+
+    def test_non_string_content(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        entry = json.dumps({'type': 'user', 'message': {'content': [{'type': 'tool_result'}]}})
+        transcript.write_text(entry + '\n')
+        effort, _, _ = scan_transcript_effort(str(transcript))
+        assert effort is None
+
+    def test_reads_beyond_first_chunk(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        effort_content = '<local-command-stdout>Set effort level to max</local-command-stdout>'
+        padding = [transcript_line('x' * 200) for _ in range(200)]
+        lines = [transcript_line(effort_content), *padding]
+        transcript.write_text('\n'.join(lines) + '\n')
+        effort, _, _ = scan_transcript_effort(str(transcript))
+        assert effort == 'max'
+
+    def test_returns_latest_ts(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        entry = json.dumps({
+            'type': 'user',
+            'timestamp': '2026-03-15T11:00:00Z',
+            'message': {'content': '<local-command-stdout>Set effort level to max</local-command-stdout>'},
+        })
+        transcript.write_text(entry + '\n')
+        effort, ts, _ = scan_transcript_effort(str(transcript))
+        assert effort == 'max'
+        assert ts == '2026-03-15T11:00:00Z'
+
+    def test_since_ts_skips_old(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        old_entry = json.dumps({
+            'type': 'user',
+            'timestamp': '2026-03-15T10:00:00Z',
+            'message': {'content': '<local-command-stdout>Set effort level to low</local-command-stdout>'},
+        })
+        new_entry = json.dumps({
+            'type': 'user',
+            'timestamp': '2026-03-15T11:00:00Z',
+            'message': {'content': '<local-command-stdout>Set effort level to max</local-command-stdout>'},
+        })
+        transcript.write_text(old_entry + '\n' + new_entry + '\n')
+        effort, ts, _ = scan_transcript_effort(str(transcript), '2026-03-15T10:00:00Z')
+        assert effort == 'max'
+        assert ts == '2026-03-15T11:00:00Z'
+
+    def test_invalid_json_skipped(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        content = '<local-command-stdout>Set effort level to high</local-command-stdout>'
+        lines = [transcript_line(content), '{bad json']
+        transcript.write_text('\n'.join(lines) + '\n')
+        effort, _, _ = scan_transcript_effort(str(transcript))
+        assert effort == 'high'
+
+    def test_synthetic_invalidates_effort(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        effort_entry = transcript_line('<local-command-stdout>Set effort level to high</local-command-stdout>')
+        synthetic_entry = json.dumps({
+            'type': 'assistant',
+            'message': {'model': '<synthetic>', 'content': [{'type': 'text', 'text': 'No response requested.'}]},
+        })
+        lines = [effort_entry, synthetic_entry]
+        transcript.write_text('\n'.join(lines) + '\n')
+        effort, _, _ = scan_transcript_effort(str(transcript))
+        assert effort is None
+
+
+class TestResolveEffort:
+    def test_scan_effort_returned(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        content = '<local-command-stdout>Set effort level to max</local-command-stdout>'
+        transcript.write_text(transcript_line(content) + '\n')
+        with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=tmp_path / 'cache'):
+            result = resolve_effort(str(transcript), 'sess-1')
+        assert result == 'max'
+
+    def test_cached_effort_used_when_no_transcript(self, tmp_path: Path) -> None:
+        cache_dir = tmp_path / 'cache'
+        cache_dir.mkdir()
+        (cache_dir / 'sess-1.json').write_text(json.dumps({'effort': 'high', '_v': app_version}))
+        with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=cache_dir):
+            result = resolve_effort(None, 'sess-1')
+        assert result == 'high'
+
+    def test_no_effort_no_cache_returns_none(self, tmp_path: Path) -> None:
+        with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=tmp_path):
+            result = resolve_effort(None, 'sess-new')
+        assert result is None
+
+    def test_no_session_id_returns_none(self) -> None:
+        result = resolve_effort(None, None)
+        assert result is None
+
+    def test_scan_beats_cached_effort(self, tmp_path: Path) -> None:
+        cache_dir = tmp_path / 'cache'
+        cache_dir.mkdir()
+        (cache_dir / 'sess-1.json').write_text(json.dumps({'effort': 'high'}))
+        transcript = tmp_path / 'session.jsonl'
+        content = '<local-command-stdout>Set effort level to max</local-command-stdout>'
+        transcript.write_text(transcript_line(content) + '\n')
+        with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=cache_dir):
+            result = resolve_effort(str(transcript), 'sess-1')
+        assert result == 'max'
+
+    def test_incremental_scan(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        old_entry = json.dumps({
+            'type': 'user',
+            'timestamp': '2026-03-15T10:00:00Z',
+            'message': {'content': '<local-command-stdout>Set effort level to low</local-command-stdout>'},
+        })
+        new_entry = json.dumps({
+            'type': 'user',
+            'timestamp': '2026-03-15T11:00:00Z',
+            'message': {'content': '<local-command-stdout>Set effort level to max</local-command-stdout>'},
+        })
+        transcript.write_text(old_entry + '\n' + new_entry + '\n')
+        cache_dir = tmp_path / 'cache'
+        cache_dir.mkdir()
+        (cache_dir / 'sess-1.json').write_text(json.dumps({'effort': 'low', 'ts': '2026-03-15T10:00:00Z'}))
+        with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=cache_dir):
+            result = resolve_effort(str(transcript), 'sess-1')
+        assert result == 'max'
+
+    def test_new_entries_preserve_cached_effort(self, tmp_path: Path) -> None:
+        cache_dir = tmp_path / 'cache'
+        cache_dir.mkdir()
+        (cache_dir / 'sess-1.json').write_text(
+            json.dumps({'effort': 'high', 'ts': '2026-03-15T10:00:00Z', '_v': app_version})
+        )
+        transcript = tmp_path / 'session.jsonl'
+        entry = json.dumps({'type': 'user', 'timestamp': '2026-03-15T11:00:00Z', 'message': {'content': 'hello'}})
+        transcript.write_text(entry + '\n')
+        with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=cache_dir):
+            result = resolve_effort(str(transcript), 'sess-1')
+        assert result == 'high'
+
+    def test_synthetic_clears_cached_effort(self, tmp_path: Path) -> None:
+        cache_dir = tmp_path / 'cache'
+        cache_dir.mkdir()
+        (cache_dir / 'sess-1.json').write_text(json.dumps({'effort': 'high'}))
+        transcript = tmp_path / 'session.jsonl'
+        synthetic = json.dumps({
+            'type': 'assistant',
+            'timestamp': '2026-03-15T11:00:00Z',
+            'message': {'model': '<synthetic>', 'content': [{'type': 'text', 'text': 'No response requested.'}]},
+        })
+        transcript.write_text(synthetic + '\n')
+        with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=cache_dir):
+            result = resolve_effort(str(transcript), 'sess-1')
+        assert result is None
+
+
+class TestReadSettingsEffort:
     def test_valid_settings(self, tmp_path: Path) -> None:
         settings = tmp_path / 'settings.json'
         settings.write_text(json.dumps({'effortLevel': 'low'}))
         with mock.patch.object(Path, 'expanduser', return_value=settings):
-            assert read_effort() == 'low'
+            assert read_settings_effort() == 'low'
 
     def test_missing_file(self, tmp_path: Path) -> None:
-        missing = tmp_path / 'nonexistent.json'
-        with mock.patch.object(Path, 'expanduser', return_value=missing):
-            assert read_effort() == 'default'
+        with mock.patch.object(Path, 'expanduser', return_value=tmp_path / 'nonexistent.json'):
+            assert read_settings_effort() == 'medium'
 
     def test_invalid_json(self, tmp_path: Path) -> None:
         settings = tmp_path / 'settings.json'
-        settings.write_text('{bad json')
+        settings.write_text('{bad')
         with mock.patch.object(Path, 'expanduser', return_value=settings):
-            assert read_effort() == 'default'
+            assert read_settings_effort() == 'medium'
+
+    def test_no_effort_key(self, tmp_path: Path) -> None:
+        settings = tmp_path / 'settings.json'
+        settings.write_text(json.dumps({'model': 'opus'}))
+        with mock.patch.object(Path, 'expanduser', return_value=settings):
+            assert read_settings_effort() == 'medium'
+
+
+class TestSessionCache:
+    def test_read_missing(self, tmp_path: Path) -> None:
+        with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=tmp_path):
+            assert read_session_cache('missing') == {}
+
+    def test_write_and_read(self, tmp_path: Path) -> None:
+        with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=tmp_path):
+            write_session_cache('sess-1', {'effort': 'high'})
+            assert read_session_cache('sess-1')['effort'] == 'high'
+
+    def test_write_overwrites(self, tmp_path: Path) -> None:
+        with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=tmp_path):
+            write_session_cache('sess-1', {'effort': 'high'})
+            write_session_cache('sess-1', {'effort': 'low'})
+            assert read_session_cache('sess-1')['effort'] == 'low'
+
+    def test_version_mismatch_ignored(self, tmp_path: Path) -> None:
+        with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=tmp_path):
+            (tmp_path / 'sess-1.json').write_text(json.dumps({'effort': 'high', '_v': '0.0.0'}))
+            assert read_session_cache('sess-1') == {}
+
+    def test_write_oserror_silenced(self, tmp_path: Path) -> None:
+        with (
+            mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=tmp_path),
+            mock.patch.object(Path, 'mkdir', side_effect=OSError),
+        ):
+            write_session_cache('sess-fail', {'effort': 'high'})
+
+    def test_returns_path(self) -> None:
+        result = session_cache_dir()
+        assert result.name == 'sessions'
+        assert 'claude-vibeline' in str(result)
+
+    def test_read_invalid_json(self, tmp_path: Path) -> None:
+        (tmp_path / 'bad.json').write_text('{bad json')
+        with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=tmp_path):
+            assert read_session_cache('bad') == {}
+
+
+class TestCleanupSessionCache:
+    def test_removes_old_files(self, tmp_path: Path) -> None:
+        old = tmp_path / 'old-session'
+        old.write_text('high')
+        os.utime(old, (0, 0))
+        recent = tmp_path / 'recent-session'
+        recent.write_text('low')
+        cleanup_session_cache(tmp_path)
+        assert not old.exists()
+        assert recent.exists()
+
+    def test_oserror_silenced(self) -> None:
+        cleanup_session_cache(Path('/nonexistent/path'))
 
 
 class TestReadOauthToken:
@@ -316,11 +731,11 @@ class TestTokenFromEntry:
             assert read_oauth_token() is None
 
 
-class TestWriteCache:
+class TestWriteUsageCache:
     def test_writes_valid_json(self, tmp_path: Path) -> None:
         cache = tmp_path / 'cache' / 'usage.json'
         data: UsageData = {'five_hour': {'utilization': 10}}
-        write_cache(cache, data)
+        write_usage_cache(cache, data)
         written = json.loads(cache.read_text())
         assert written['five_hour'] == {'utilization': 10}
         assert '_ts' in written
@@ -328,7 +743,7 @@ class TestWriteCache:
     def test_handles_oserror(self) -> None:
         cache = Path('/nonexistent/deeply/nested/usage.json')
         with mock.patch('claude_vibeline.statusline.Path.mkdir', side_effect=OSError):
-            write_cache(cache, {'five_hour': {'utilization': 0}})
+            write_usage_cache(cache, {'five_hour': {'utilization': 0}})
 
 
 class TestFetchUsage:
@@ -551,7 +966,7 @@ STDIN_DATA = {
 
 
 def run_main(
-    stdin_data: StdinData | dict[str, Any] | None = None, argv: list[str] | None = None, effort: str = 'high'
+    stdin_data: StdinData | dict[str, Any] | None = None, argv: list[str] | None = None, effort: str | None = 'high'
 ) -> str:
     import claude_vibeline.statusline as _mod  # noqa: PLC0415
 
@@ -559,15 +974,13 @@ def run_main(
     argv = argv or ['claude-vibeline']
     stdin_buf = io.BytesIO(json.dumps(data).encode())
     stdout_buf = io.BytesIO()
-    # main() wraps sys.stdout.buffer with a new TextIOWrapper,
-    # so provide objects with .buffer pointing to raw BytesIO.
     fake_stdin = io.TextIOWrapper(stdin_buf, encoding='utf-8')
     fake_stdout = io.TextIOWrapper(stdout_buf, encoding='utf-8')
     with (
         mock.patch('sys.argv', argv),
         mock.patch.object(_mod.sys, 'stdin', fake_stdin),
         mock.patch.object(_mod.sys, 'stdout', fake_stdout),
-        mock.patch('claude_vibeline.statusline.read_effort', return_value=effort),
+        mock.patch('claude_vibeline.statusline.resolve_effort', return_value=effort),
     ):
         main()
         _mod.sys.stdout.flush()
@@ -640,17 +1053,16 @@ class TestMain:
         assert 'extra' in output
         assert '2.50' in output
 
-    def test_default_effort_becomes_high(self) -> None:
+    def test_max_effort(self) -> None:
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(effort='default')
-        assert '(high)' in output
+            output = run_main(effort='max')
+        assert '(max)' in output
 
     def test_haiku_no_effort(self) -> None:
         data = {**STDIN_DATA, 'model': {'display_name': 'Haiku 4.5'}}
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
             output = run_main(stdin_data=data)
         assert 'Haiku' in output
-        # Haiku should not show effort level
         assert '(' not in output
 
     def test_stale_within_window(self) -> None:
@@ -732,6 +1144,16 @@ class TestMain:
         entry = json.loads(log_file.read_text(encoding='utf-8').strip())
         assert 'my-project' in entry['output']
         assert '\033[' not in entry['output']
+        assert entry['effort'] == 'high'
+
+    def test_none_effort_shows_settings_fallback(self) -> None:
+        with (
+            mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)),
+            mock.patch('claude_vibeline.statusline.read_settings_effort', return_value='high'),
+        ):
+            output = run_main(effort=None)
+        assert 'Opus 4.6' in output
+        assert '(high?)' in output
 
 
 class TestWriteDebugLog:
@@ -789,18 +1211,36 @@ class TestWriteDebugLog:
         entry = json.loads(log_file.read_text(encoding='utf-8').strip())
         assert entry['session'] is None
 
-    def test_effort_from_settings(self, tmp_path: Path) -> None:
+    def test_effort_in_entry(self, tmp_path: Path) -> None:
         log_file = tmp_path / 'debug.log'
         args = Args(debug=True)
         with mock.patch('claude_vibeline.statusline.debug_log_path', return_value=log_file):
-            write_debug_log('test output', args, effort='low')
+            write_debug_log('test output', args, effort='high')
         entry = json.loads(log_file.read_text(encoding='utf-8').strip())
-        assert entry['effort_from_settings'] == 'low'
+        assert entry['effort'] == 'high'
 
     def test_oserror_silenced(self) -> None:
         args = Args(debug=True)
         with mock.patch('claude_vibeline.statusline.debug_log_path', side_effect=OSError):
-            write_debug_log('test output', args)  # should not raise
+            write_debug_log('test output', args)
+
+    def test_usage_data_in_entry(self, tmp_path: Path) -> None:
+        log_file = tmp_path / 'debug.log'
+        args = Args(debug=True)
+        usage: UsageData = {'five_hour': {'utilization': 42}}
+        with mock.patch('claude_vibeline.statusline.debug_log_path', return_value=log_file):
+            write_debug_log('test output', args, usage_data=usage, stale_ts=123.0)
+        entry = json.loads(log_file.read_text(encoding='utf-8').strip())
+        assert entry['usage']['five_hour']['utilization'] == 42
+        assert entry['stale_ts'] == 123
+
+    def test_nbsp_replaced_in_output(self, tmp_path: Path) -> None:
+        log_file = tmp_path / 'debug.log'
+        args = Args(debug=True)
+        with mock.patch('claude_vibeline.statusline.debug_log_path', return_value=log_file):
+            write_debug_log(f'a{NBSP}b', args)
+        entry = json.loads(log_file.read_text(encoding='utf-8').strip())
+        assert entry['output'] == 'a b'
 
 
 class TestReadLastUserTimestamp:
@@ -926,7 +1366,6 @@ class TestReadUserTimestamps:
         assert timestamps == []
 
     def test_tool_result_counted_as_user(self, tmp_path: Path) -> None:
-        """Tool results have type 'user' in transcripts and should be included."""
         transcript = tmp_path / 'session.jsonl'
         lines = [
             _user('2026-03-07T10:00:00Z'),
@@ -942,7 +1381,6 @@ class TestReadUserTimestamps:
         assert last_user_idx == 1
 
     def test_no_message_field_treated_as_non_user(self, tmp_path: Path) -> None:
-        """Entries without message field are not identified as user."""
         transcript = tmp_path / 'session.jsonl'
         lines = [
             json.dumps({'type': 'user', 'timestamp': '2026-03-07T10:00:00Z'}),
@@ -962,25 +1400,19 @@ class TestHasCacheGap:
 
     def test_gap_after_user(self) -> None:
         now = time.time()
-        # user at idx 1, gap between idx 0 and idx 1
         assert has_cache_gap([now, now - PROMPT_CACHE_TTL - 1], last_user_idx=1)
 
     def test_gap_before_user_ignored(self) -> None:
-        """Gap before last user message should not trigger ↻."""
         now = time.time()
-        # tool_result, tool_result (gap here), user
         timestamps = [now, now - 30, now - PROMPT_CACHE_TTL - 60]
         assert not has_cache_gap(timestamps, last_user_idx=0)
 
     def test_gap_after_user_in_middle(self) -> None:
-        """Gap between tool results after last user message."""
         now = time.time()
-        # tool_result, tool_result (gap), user, old_tool
         timestamps = [now, now - PROMPT_CACHE_TTL - 10, now - PROMPT_CACHE_TTL - 20, now - PROMPT_CACHE_TTL - 30]
         assert has_cache_gap(timestamps, last_user_idx=2)
 
     def test_none_idx_checks_all(self) -> None:
-        """When last_user_idx is None, check all pairs."""
         now = time.time()
         assert has_cache_gap([now, now - PROMPT_CACHE_TTL - 1], last_user_idx=None)
 
@@ -1017,7 +1449,6 @@ class TestPromptCacheSection:
         assert ':' in result
 
     def test_recached_after_gap(self, tmp_path: Path) -> None:
-        """User message, then gap, then tool result — shows ↻."""
         transcript = tmp_path / 'session.jsonl'
         now = datetime.now(UTC)
         user_ts = (now - timedelta(seconds=PROMPT_CACHE_TTL + 60)).isoformat()
@@ -1032,7 +1463,6 @@ class TestPromptCacheSection:
         assert ':' in result
 
     def test_no_recache_indicator_when_no_gap(self, tmp_path: Path) -> None:
-        """No ↻ when entries after last user are within cache TTL."""
         transcript = tmp_path / 'session.jsonl'
         now = datetime.now(UTC)
         user_ts = (now - timedelta(seconds=60)).isoformat()
@@ -1056,7 +1486,6 @@ class TestPromptCacheSection:
         assert '\u21bb' not in result
 
     def test_gap_before_user_ignored(self, tmp_path: Path) -> None:
-        """Gap before last user message does NOT show ↻."""
         transcript = tmp_path / 'session.jsonl'
         now = datetime.now(UTC)
         lines = [
@@ -1074,7 +1503,6 @@ class TestPromptCacheSection:
         assert '\u21bb' not in result
 
     def test_gap_after_user_shows_recached(self, tmp_path: Path) -> None:
-        """Gap between tool results after last user shows ↻."""
         transcript = tmp_path / 'session.jsonl'
         now = datetime.now(UTC)
         lines = [
@@ -1097,15 +1525,10 @@ class TestPromptCacheSection:
 
 
 class TestChunkedTranscriptReading:
-    """Verify read_user_timestamps works when transcript exceeds TAIL_CHUNK."""
-
     def test_user_found_in_second_chunk(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
-        # Build a transcript larger than TAIL_CHUNK where the user message
-        # is near the beginning (only reachable via multi-chunk reading).
         user_line = _user('2026-03-07T10:00:00Z')
         filler_line = _assistant('2026-03-07T10:00:30Z')
-        # Each JSONL line is ~80 bytes; need enough to exceed TAIL_CHUNK.
         filler_count = (TAIL_CHUNK // len(filler_line)) + 10
         lines = [user_line] + [filler_line] * filler_count
         transcript.write_text('\n'.join(lines) + '\n')
@@ -1129,16 +1552,12 @@ class TestChunkedTranscriptReading:
 
 
 class TestWrapPartsAnsi:
-    """Verify wrap_parts uses visible_len, not len, for width calculation."""
-
     def test_ansi_parts_fit_on_one_line(self) -> None:
-        # Each part is ~5 visible chars but ~20+ raw chars with ANSI codes.
         parts = [f'{ORANGE}hello{RESET}', f'{PERC}world{RESET}']
         result = wrap_parts(parts, 40)
         assert '\n' not in result
 
     def test_ansi_parts_wrap_at_visible_width(self) -> None:
-        # Two parts, each ~10 visible chars. Should wrap at columns=15.
         p1 = f'{ORANGE}{"a" * 10}{RESET}'
         p2 = f'{PERC}{"b" * 10}{RESET}'
         result = wrap_parts([p1, p2], 15)
@@ -1156,7 +1575,6 @@ class TestProjectNameEdgeCases:
         data = {**STDIN_DATA, 'workspace': {'project_dir': '/'}}
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
             output = run_main(stdin_data=data)
-        # Path('/').name == '', so no project shown
         assert 'Opus' in output
 
     def test_missing_workspace(self) -> None:
@@ -1237,34 +1655,45 @@ class TestUsageParts:
 
 class TestModelSection:
     def test_standard_model(self) -> None:
-        data: StdinData = {'model': {'display_name': 'Opus 4.6'}}
-        with mock.patch('claude_vibeline.statusline.read_effort', return_value='high'):
-            result = model_section(data)
+        result = model_section('Opus 4.6', 'high')
         assert 'Opus 4.6' in result
         assert '(high)' in result
 
     def test_low_effort(self) -> None:
-        data: StdinData = {'model': {'display_name': 'Sonnet 4.6'}}
-        with mock.patch('claude_vibeline.statusline.read_effort', return_value='low'):
-            result = model_section(data)
+        result = model_section('Sonnet 4.6', 'low')
         assert '(low)' in result
 
+    def test_medium_effort(self) -> None:
+        result = model_section('Opus 4.6', 'medium')
+        assert '(medium)' in result
+
+    def test_max_effort(self) -> None:
+        result = model_section('Opus 4.6', 'max')
+        assert '(max)' in result
+
     def test_haiku_skips_effort(self) -> None:
-        data: StdinData = {'model': {'display_name': 'Haiku 4.5'}}
-        result = model_section(data)
+        result = model_section('Haiku 4.5', 'high')
         assert 'Haiku' in result
         assert '(' not in result
 
-    def test_missing_model(self) -> None:
-        data: StdinData = {}
-        with mock.patch('claude_vibeline.statusline.read_effort', return_value='high'):
-            result = model_section(data)
-        assert 'Unknown' in result
+    def test_none_effort_shows_settings_fallback(self) -> None:
+        with mock.patch('claude_vibeline.statusline.read_settings_effort', return_value='high'):
+            result = model_section('Opus 4.6', None)
+        assert 'Opus 4.6' in result
+        assert '(high?)' in result
+
+    def test_unsupported_settings_effort_defaults_to_medium(self) -> None:
+        with mock.patch('claude_vibeline.statusline.read_settings_effort', return_value='max'):
+            result = model_section('Sonnet 4.6', None)
+        assert '(medium?)' in result
+
+    def test_unknown_model_skips_effort(self) -> None:
+        result = model_section('CustomModel 1.0', 'high')
+        assert 'CustomModel' in result
+        assert '(' not in result
 
 
 class TestIsUserMessage:
-    """Edge cases for is_user_message via read_user_timestamps."""
-
     def test_empty_string_content_not_user(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
         entry = json.dumps({'type': 'user', 'timestamp': '2026-03-07T10:00:00Z', 'message': {'content': ''}})
@@ -1291,17 +1720,14 @@ class TestIsUserMessage:
 class TestBarRounding:
     def test_1_percent_width_8_rounds_to_zero(self) -> None:
         result = bar(1, 8)
-        # round(1 * 8 / 100) = round(0.08) = 0
         assert result.count(FILL) == 0
         assert result.count(EMPTY) == 8
 
     def test_7_percent_width_8_rounds_to_one(self) -> None:
         result = bar(7, 8)
-        # round(7 * 8 / 100) = round(0.56) = 1
         assert result.count(FILL) == 1
         assert result.count(EMPTY) == 7
 
     def test_99_percent_width_8(self) -> None:
         result = bar(99, 8)
-        # round(99 * 8 / 100) = round(7.92) = 8
         assert result.count(FILL) == 8

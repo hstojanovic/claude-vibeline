@@ -8,6 +8,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- Change effort display: show `(high)` when confirmed by `/model` or `/effort`, show `(high?)` when unconfirmed (from `settings.json` fallback, defaults to `medium`)
+
+### Added
+
+- Add `max` effort level support (Opus 4.6 only)
+- Add effort resolution from session transcript (`/model`, `/effort`, `/effort auto` commands) with incremental scanning and per-session caching
+- Add effort invalidation after session resume (detected via `<synthetic>` transcript entries)
+- Add per-model supported effort levels (Opus: low/medium/high/max, Sonnet: low/medium/high)
+- Add automatic cleanup of session cache files older than 30 days
+
 ## [1.0.0] - 2026-03-12
 
 ### Added
