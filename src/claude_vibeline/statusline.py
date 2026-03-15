@@ -447,9 +447,9 @@ def usage_section(label: str, usage: UsageBucket, bar_width: int, *, stale_ts: f
     resets_at = usage.get('resets_at')
     if perc is None:
         return None
-    is_stale = stale_ts is not None
-    if is_stale and resets_at is not None and is_past(resets_at):
+    if resets_at is not None and is_past(resets_at):
         return f'{LABEL}{label}{RESET} {DIM}?{RESET}'
+    is_stale = stale_ts is not None
     perc_int = round(perc)
     approx = f'{DIM}\u2265{RESET}' if is_stale else ''
     countdown = format_countdown(resets_at) if resets_at is not None else ''

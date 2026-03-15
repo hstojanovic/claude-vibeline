@@ -148,6 +148,15 @@ class TestUsageSection:
         assert '42%' not in result
         assert FILL not in result
 
+    @freeze_time('2026-03-07T12:00:00Z')
+    def test_fresh_past_reset(self) -> None:
+        usage: UsageBucket = {'utilization': 42, 'resets_at': '2026-03-07T10:00:00+00:00'}
+        result = usage_section('sess', usage, 8)
+        assert result is not None
+        assert '?' in result
+        assert '42%' not in result
+        assert FILL not in result
+
 
 class TestExtraSection:
     def test_enabled_with_limit(self) -> None:
@@ -232,7 +241,7 @@ class TestFormatCountdown:
         assert 'd' not in result
 
     @freeze_time('2026-02-24T10:00:00Z')
-    def test_past_timestamp(self) -> None:
+    def test_past_timestamp_clamps_to_zero(self) -> None:
         result = format_countdown('2026-02-20T00:00:00+00:00')
         assert '0m' in result
 

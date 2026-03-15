@@ -20,6 +20,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Add per-model supported effort levels (Opus: low/medium/high/max, Sonnet: low/medium/high)
 - Add automatic cleanup of session cache files older than 30 days
 
+### Fixed
+
+- Fix usage showing stale percentage with `0m` countdown when `resets_at` is in the past
+
+
 ## [1.0.0] - 2026-03-12
 
 ### Added
