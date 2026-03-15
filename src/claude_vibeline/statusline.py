@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import io
 import json
@@ -5,7 +6,9 @@ import os
 import re
 import subprocess as sp
 import sys
+import tempfile
 import time
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, TypedDict
@@ -38,6 +41,7 @@ ANSI_RE = re.compile(r'\033\[[0-9;]*m')
 USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 CACHE_TTL_SECONDS = 60
 PROMPT_CACHE_TTL = 300  # 5-minute prompt cache TTL
+CACHE_LOW_THRESHOLD = 120  # 2 minutes — switch from green to yellow
 DEBUG_LOG_MAX_BYTES = 1_000_000
 EFFORT_LEVELS = r'low|medium|high|max'
 MODEL_EFFORT_RE = re.compile(rf'with ({EFFORT_LEVELS}) effort')
@@ -107,6 +111,9 @@ class Args:
     project: Annotated[bool, cappa.Arg(long='--no-project', help='hide project name', show_default=False)] = True
     model: Annotated[bool, cappa.Arg(long='--no-model', help='hide model and effort level', show_default=False)] = True
     cache: Annotated[bool, cappa.Arg(long='--no-cache', help='hide prompt cache status', show_default=False)] = True
+    refresh: Annotated[
+        bool, cappa.Arg(long='--no-refresh', help='disable background cache timer refresh', show_default=False)
+    ] = True
     context: Annotated[
         bool, cappa.Arg(long=['--no-context', '--no-ctx'], help='hide context window usage', show_default=False)
     ] = True
@@ -150,15 +157,17 @@ def bar(perc: int, width: int) -> str:
 
 # --- Effort resolution (not in stdin, parsed from transcript) ---
 
-SUPPORTED_EFFORTS: dict[str, set[str]] = {'opus': {'low', 'medium', 'high', 'max'}, 'sonnet': {'low', 'medium', 'high'}}
-
 
 def read_settings_effort() -> str:
+    """
+    Read effort from settings.json, suffixed with '?' to indicate uncertainty.
+    """
     try:
         settings = Path('~/.claude/settings.json').expanduser()
-        return json.loads(settings.read_text()).get('effortLevel', 'medium')
+        effort = json.loads(settings.read_text()).get('effortLevel', 'medium')
     except OSError, json.JSONDecodeError:
-        return 'medium'
+        effort = 'medium'
+    return f'{effort}?'
 
 
 def parse_effort_from_line(visible: str) -> str | None:
@@ -184,7 +193,8 @@ def parse_effort_from_line(visible: str) -> str | None:
 
 class SessionCache(TypedDict, total=False):
     effort: str
-    ts: str
+    effort_ts: str
+    last_user_ts: float
 
 
 def session_cache_dir() -> Path:
@@ -203,11 +213,18 @@ def read_session_cache(session_id: str) -> SessionCache:
 
 
 def write_session_cache(session_id: str, data: SessionCache) -> None:
+    """
+    Merge data into the session cache file (read-modify-write).
+    """
     cache_dir = session_cache_dir()
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_file = cache_dir / f'{session_id}.json'
-        cache_file.write_text(json.dumps({**data, '_v': app_version}))
+        existing = read_session_cache(session_id)
+        merged = {**existing, **data, '_v': app_version}
+        tmp = cache_file.with_suffix(f'.{os.getpid()}.tmp')
+        tmp.write_text(json.dumps(merged))
+        tmp.replace(cache_file)
         cleanup_session_cache(cache_dir)
     except OSError:
         pass
@@ -226,7 +243,7 @@ def cleanup_session_cache(cache_dir: Path) -> None:
         pass
 
 
-class _EffortScanner:
+class EffortScanner:
     def __init__(self, since_ts: str) -> None:
         self.since_ts = since_ts
         self.saw_synthetic: bool = False
@@ -271,7 +288,7 @@ def scan_transcript_effort(transcript_path: str | None, since_ts: str = '') -> t
     """
     if transcript_path is None:
         return None, '', False
-    scanner = _EffortScanner(since_ts)
+    scanner = EffortScanner(since_ts)
     try:
         with Path(transcript_path).open('rb') as f:
             f.seek(0, 2)
@@ -296,29 +313,34 @@ def scan_transcript_effort(transcript_path: str | None, since_ts: str = '') -> t
     return scanner.effort, scanner.latest_ts, scanner.saw_synthetic
 
 
-def resolve_effort(transcript_path: str | None, session_id: str | None) -> str | None:
+def resolve_effort(transcript_path: str | None, session_id: str | None) -> str:
     """
-    Resolve effort: transcript → session cache → None.
-
-    Returns None when effort is unknown.
+    Resolve effort: transcript → session cache → settings fallback.
     """
     cached = read_session_cache(session_id) if session_id is not None else {}
-    effort, latest_ts, saw_synthetic = scan_transcript_effort(transcript_path, cached.get('ts', ''))
+    effort, latest_ts, saw_synthetic = scan_transcript_effort(transcript_path, cached.get('effort_ts', ''))
 
     if effort is not None:
         if session_id is not None:
-            write_session_cache(session_id, {'effort': effort, 'ts': latest_ts})
+            write_session_cache(session_id, {'effort': effort, 'effort_ts': latest_ts})
         return effort
 
     if session_id is not None and latest_ts:
-        update: SessionCache = {'ts': latest_ts}
+        update: SessionCache = {'effort_ts': latest_ts}
         if saw_synthetic:
-            cached.pop('effort', None)
-        if 'effort' in cached:
-            update['effort'] = cached['effort']
+            fallback = read_settings_effort()
+            write_session_cache(session_id, {**update, 'effort': fallback})
+            return fallback
         write_session_cache(session_id, update)
 
-    return cached.get('effort')
+    effort = cached.get('effort') or None
+    if effort is not None:
+        return effort
+
+    fallback = read_settings_effort()
+    if session_id is not None:
+        write_session_cache(session_id, {'effort': fallback})
+    return fallback
 
 
 # --- OAuth / Usage API ---
@@ -376,10 +398,14 @@ def fetch_usage() -> tuple[UsageData | None, float | None]:
     try:
         if cache.exists():
             cached = json.loads(cache.read_text())
-            stale_ts = cached.pop('_ts', 0)
-            stale = cached or None
-            if time.time() - stale_ts < CACHE_TTL_SECONDS:
-                return stale, None
+            if cached.get('_v') != app_version:
+                cache.unlink(missing_ok=True)
+            else:
+                stale_ts = cached.pop('_ts', 0)
+                cached.pop('_v', None)
+                stale = cached or None
+                if time.time() - stale_ts < CACHE_TTL_SECONDS:
+                    return stale, None
     except OSError, json.JSONDecodeError:
         pass
 
@@ -562,16 +588,6 @@ def parse_user_timestamps(text: str) -> tuple[list[float], int | None]:
     return timestamps, last_user_idx
 
 
-def read_last_user_timestamps(transcript_path: str, count: int = 2) -> list[float]:
-    timestamps, _ = read_user_timestamps(transcript_path)
-    return timestamps[:count]
-
-
-def read_last_user_timestamp(transcript_path: str) -> float | None:
-    timestamps, _ = read_user_timestamps(transcript_path)
-    return timestamps[0] if timestamps else None
-
-
 def has_cache_gap(timestamps: list[float], last_user_idx: int | None = None) -> bool:
     """
     Check for cache gaps since the last user message.
@@ -580,22 +596,156 @@ def has_cache_gap(timestamps: list[float], last_user_idx: int | None = None) -> 
     return any(timestamps[i] - timestamps[i + 1] > PROMPT_CACHE_TTL for i in range(end))
 
 
-def prompt_cache_section(transcript_path: str | None) -> str | None:
+def format_cache_countdown(secs_left: int) -> str:
+    """
+    Format seconds as a compact countdown: "4m" when ≥ 60s, "47s" when < 60s.
+    """
+    if secs_left >= 60:
+        return f'{secs_left // 60}m'
+    return f'{secs_left}s'
+
+
+def prompt_cache_section(transcript_path: str | None, session_id: str | None = None) -> tuple[str | None, float | None]:
+    """
+    Return (section_string, last_user_timestamp).
+    """
     if transcript_path is None:
-        return None
+        return None, None
     timestamps, last_user_idx = read_user_timestamps(transcript_path)
     if not timestamps:
-        return None
-    last_ts = timestamps[0]
-    expiry = last_ts + PROMPT_CACHE_TTL
-    now = time.time()
-    expiry_local = datetime.fromtimestamp(expiry).astimezone()
-    hh_mm = expiry_local.strftime('%H:%M')
-    if now >= expiry:
-        return f'{LABEL}cache{RESET} {RED}\u25cb {hh_mm}{RESET}'
-    if has_cache_gap(timestamps, last_user_idx):
-        return f'{LABEL}cache{RESET} {YELLOW}\u21bb{RESET} {PERC}{hh_mm}{RESET}'
-    return f'{LABEL}cache{RESET} {GREEN}\u25cf{RESET} {PERC}{hh_mm}{RESET}'
+        cached = read_session_cache(session_id) if session_id is not None else {}
+        last_ts = cached.get('last_user_ts')
+        if last_ts is None:
+            return None, None
+    else:
+        last_ts = timestamps[0]
+        if session_id is not None:
+            write_session_cache(session_id, {'last_user_ts': last_ts})
+    secs_left = max(0, int(last_ts + PROMPT_CACHE_TTL - time.time()))
+    gap = has_cache_gap(timestamps, last_user_idx)
+    gap_icon = f'{RED}!{RESET} ' if gap else ''
+
+    if secs_left == 0:
+        return f'{LABEL}cache{RESET} {gap_icon}{RED}\u2717{RESET}', last_ts
+
+    countdown = format_cache_countdown(secs_left)
+    if secs_left <= CACHE_LOW_THRESHOLD:
+        return f'{LABEL}cache{RESET} {gap_icon}{YELLOW}\u26a0 {countdown}{RESET}', last_ts
+    return f'{LABEL}cache{RESET} {gap_icon}{GREEN}\u2713 {countdown}{RESET}', last_ts
+
+
+# --- Cache refresh (settings.json trigger) ---
+
+
+REFRESH_INTERVAL = 30
+
+
+def refresh_lock_path() -> Path:
+    return Path(platformdirs.user_cache_dir('claude-vibeline')) / 'refresh.lock'
+
+
+def toggle_settings_space() -> None:
+    """
+    Toggle a trailing space in the statusLine command value in settings.json.
+    """
+    settings = Path('~/.claude/settings.json').expanduser()
+    try:
+        data = json.loads(settings.read_text(encoding='utf-8'))
+    except OSError, json.JSONDecodeError:
+        return
+    status_line = data.get('statusLine')
+    if not isinstance(status_line, dict):
+        return
+    cmd = status_line.get('command')
+    if not isinstance(cmd, str):
+        return
+    status_line['command'] = cmd[:-1] if cmd.endswith(' ') else cmd + ' '
+    with contextlib.suppress(OSError):
+        tmp = settings.with_suffix(f'.{os.getpid()}.tmp')
+        tmp.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
+        tmp.replace(settings)
+
+
+def is_lock_owner(lock: Path, token: str) -> bool:
+    """
+    Check if the given token still owns the lock file.
+    """
+    try:
+        data = json.loads(lock.read_text(encoding='utf-8'))
+        if data.get('_v') != app_version:
+            return False
+        return data.get('token') == token
+    except OSError, json.JSONDecodeError, ValueError:
+        return False
+
+
+def run_refresh_loop(expiry_ts: float, token: str) -> None:
+    """
+    Background loop: toggle settings.json every REFRESH_INTERVAL seconds.
+
+    Exits cooperatively when the lock token changes (newer updater spawned).
+    The last in-loop toggle fires after sleeping until expiry, which triggers
+    the re-render showing the expired cache state.
+    """
+    lock = refresh_lock_path()
+    try:
+        while True:
+            if not is_lock_owner(lock, token):
+                return
+            remaining = expiry_ts - time.time()
+            if remaining <= 0:
+                break
+            time.sleep(min(REFRESH_INTERVAL, remaining))
+            toggle_settings_space()
+    finally:
+        if is_lock_owner(lock, token):
+            with contextlib.suppress(OSError):
+                lock.unlink()
+
+
+def spawn_cache_updater(expiry_ts: float) -> None:
+    """
+    Spawn a detached background process that periodically toggles settings.json.
+
+    Skips if an updater with the same or later expiry is already running.
+    Spawns a new one if the expiry is later (new user message extended the cache).
+    """
+    lock = refresh_lock_path()
+    try:
+        data = json.loads(lock.read_text(encoding='utf-8'))
+        if data.get('_v') == app_version and expiry_ts <= data.get('expiry', 0):
+            return
+    except OSError, json.JSONDecodeError, ValueError:
+        pass
+    token = uuid.uuid4().hex
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    tmp = lock.with_suffix(f'.{os.getpid()}.tmp')
+    tmp.write_text(json.dumps({'token': token, 'expiry': expiry_ts, '_v': app_version}))
+    tmp.replace(lock)
+    cmd = [
+        sys.executable,
+        '-c',
+        f'from claude_vibeline.statusline import run_refresh_loop; run_refresh_loop({expiry_ts}, {token!r})',
+    ]
+    kwargs: dict[str, Any] = {'stdin': sp.DEVNULL, 'stdout': sp.DEVNULL, 'stderr': sp.DEVNULL}
+    if sys.platform == 'win32':
+        kwargs['creationflags'] = sp.CREATE_NO_WINDOW
+    else:
+        kwargs['start_new_session'] = True
+    try:
+        sp.Popen(cmd, **kwargs)
+    except OSError:
+        with contextlib.suppress(OSError):
+            lock.unlink()
+        return
+
+
+def maybe_spawn_cache_updater(last_user_ts: float | None) -> None:
+    if last_user_ts is None:
+        return
+    expiry = last_user_ts + PROMPT_CACHE_TTL
+    if time.time() < expiry:
+        spawn_cache_updater(expiry)
 
 
 # --- Context window ---
@@ -637,21 +787,21 @@ def wrap_parts(parts: list[str], columns: int) -> str:
     return '\n'.join(lines)
 
 
+SUPPORTED_EFFORTS: dict[str, set[str]] = {'opus': {'low', 'medium', 'high', 'max'}, 'sonnet': {'low', 'medium', 'high'}}
+
+
 def model_family(model_name: str) -> str:
     return model_name.split(maxsplit=1)[0].lower() if model_name else ''
 
 
-def model_section(model_name: str, effort: str | None) -> str:
+def model_section(model_name: str, effort: str) -> str:
     family = model_family(model_name)
     supported = SUPPORTED_EFFORTS.get(family)
     if supported is None:
         return f'{ORANGE}{model_name}{RESET}'
-    if effort is not None and effort in supported:
+    if effort.rstrip('?') in supported:
         return f'{ORANGE}{model_name}{RESET} {GOLD}({effort}){RESET}'
-    fallback = read_settings_effort()
-    if fallback not in supported:
-        fallback = 'medium'
-    return f'{ORANGE}{model_name}{RESET} {GOLD}({fallback}?){RESET}'
+    return f'{ORANGE}{model_name}{RESET} {GOLD}(medium?){RESET}'
 
 
 # --- Debug logging ---
@@ -668,9 +818,6 @@ def write_debug_log(  # noqa: PLR0913, PLR0917
     try:
         log = debug_log_path()
         log.parent.mkdir(parents=True, exist_ok=True)
-        if log.exists() and log.stat().st_size > DEBUG_LOG_MAX_BYTES:
-            content = log.read_bytes()
-            log.write_bytes(content[len(content) // 2 :])
         transcript = stdin_data.get('transcript_path', '') if stdin_data is not None else ''
         session_id = Path(transcript).stem if transcript else None
         entry: dict[str, Any] = {
@@ -684,8 +831,29 @@ def write_debug_log(  # noqa: PLR0913, PLR0917
             'usage': dict(usage_data) if usage_data is not None else None,
             'stale_ts': stale_ts,
         }
-        with log.open('a', encoding='utf-8') as f:
-            f.write(json.dumps(entry) + '\n')
+        line_bytes = (json.dumps(entry) + '\n').encode('utf-8')
+        if log.exists() and log.stat().st_size > DEBUG_LOG_MAX_BYTES:
+            content = log.read_bytes()
+            # Truncate at a newline boundary to preserve JSONL structure
+            mid = len(content) // 2
+            newline = content.find(b'\n', mid)
+            content = content[newline + 1 :] if newline != -1 else content[mid:]
+            fd, tmp = tempfile.mkstemp(dir=log.parent)
+            try:
+                os.write(fd, content + line_bytes)
+                os.close(fd)
+                Path(tmp).replace(log)
+            except BaseException:
+                os.close(fd)
+                with contextlib.suppress(OSError):
+                    Path(tmp).unlink()
+                raise
+        else:
+            fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+            try:
+                os.write(fd, line_bytes)
+            finally:
+                os.close(fd)
     except OSError:
         pass
 
@@ -717,8 +885,9 @@ def main() -> None:
     if args.model:
         parts.append(model_section(model_name, effort))
 
+    last_user_ts: float | None = None
     if args.cache:
-        section = prompt_cache_section(data.get('transcript_path'))
+        section, last_user_ts = prompt_cache_section(data.get('transcript_path'), data.get('session_id'))
         if section is not None:
             parts.append(section)
 
@@ -735,6 +904,9 @@ def main() -> None:
 
     output = wrap_parts(parts, args.columns)
     print(output)
+
+    if args.cache and args.refresh:
+        maybe_spawn_cache_updater(last_user_ts)
 
     if args.debug:
         write_debug_log(output, args, stdin_data=data, usage_data=usage, stale_ts=stale_ts, effort=effort)

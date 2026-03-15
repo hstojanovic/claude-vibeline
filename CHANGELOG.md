@@ -10,20 +10,25 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- Change effort display: show `(high)` when confirmed by `/model` or `/effort`, show `(high?)` when unconfirmed (from `settings.json` fallback, defaults to `medium`)
+- Change prompt cache display from time-based (`● 21:35`) to countdown (`✓ 4m`) with low-threshold warning (`⚠ 47s`) and expired (`✗`) states
+- Change session cache writes to merge fields atomically instead of full replacement
 
 ### Added
 
 - Add `max` effort level support (Opus 4.6 only)
-- Add effort resolution from session transcript (`/model`, `/effort`, `/effort auto` commands) with incremental scanning and per-session caching
+- Add effort resolution from session transcript (`/model`, `/effort`, `/effort auto` commands) with incremental scanning, per-session caching, and `settings.json` fallback (shown with `?` suffix)
 - Add effort invalidation after session resume (detected via `<synthetic>` transcript entries)
 - Add per-model supported effort levels (Opus: low/medium/high/max, Sonnet: low/medium/high)
 - Add automatic cleanup of session cache files older than 30 days
 - Add context window size display (e.g. `200k`, `1M`) from stdin `context_window_size` field
+- Add background cache timer countdown with `--no-refresh` flag to disable
+- Add version validation on all cache and lock files
+- Add atomic file writes across session cache, settings toggle, refresh lock, and debug log
 
 ### Fixed
 
 - Fix usage showing stale percentage with `0m` countdown when `resets_at` is in the past
+- Fix debug log truncation corrupting JSONL structure by cutting at arbitrary byte offsets
 
 
 ## [1.0.0] - 2026-03-12

@@ -119,6 +119,7 @@ split-on-trailing-comma = false
     "PLR0904",  # Allow many public methods (large test classes).
     "PLR6301",  # Allow methods that don't use self (test organization).
     "S101",     # Allow assert statements.
+    "S105",     # Allow hardcoded test tokens.
     "TC003",    # Keep stdlib imports at runtime (pytest evaluates annotations via __annotate__).
 ]
 

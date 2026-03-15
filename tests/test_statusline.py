@@ -3,6 +3,7 @@ import json
 import os
 import runpy
 import subprocess as sp
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -15,6 +16,7 @@ from freezegun import freeze_time
 from claude_vibeline import __version__ as app_version
 from claude_vibeline.statusline import (
     ANSI_RE,
+    CACHE_LOW_THRESHOLD,
     CACHE_TTL_SECONDS,
     DEBUG_LOG_MAX_BYTES,
     EMPTY,
@@ -28,30 +30,33 @@ from claude_vibeline.statusline import (
     TAIL_CHUNK,
     USAGE_URL,
     Args,
-    _EffortScanner,
+    EffortScanner,
     bar,
     cache_path,
     cleanup_session_cache,
     debug_log_path,
     extra_section,
     fetch_usage,
+    format_cache_countdown,
     format_context_size,
     format_countdown,
     has_cache_gap,
+    is_lock_owner,
     is_past,
     main,
     model_section,
     parse_effort_from_line,
     prompt_cache_section,
-    read_last_user_timestamp,
-    read_last_user_timestamps,
     read_oauth_token,
     read_session_cache,
     read_settings_effort,
     read_user_timestamps,
     resolve_effort,
+    run_refresh_loop,
     scan_transcript_effort,
     session_cache_dir,
+    spawn_cache_updater,
+    toggle_settings_space,
     token_from_entry,
     usage_parts,
     usage_section,
@@ -251,6 +256,20 @@ class TestFormatCountdown:
         assert not result
 
 
+class TestFormatCacheCountdown:
+    def test_minutes(self) -> None:
+        assert format_cache_countdown(240) == '4m'
+
+    def test_exactly_60(self) -> None:
+        assert format_cache_countdown(60) == '1m'
+
+    def test_seconds(self) -> None:
+        assert format_cache_countdown(47) == '47s'
+
+    def test_zero(self) -> None:
+        assert format_cache_countdown(0) == '0s'
+
+
 def transcript_line(content: str) -> str:
     return json.dumps({'type': 'user', 'message': {'content': content}})
 
@@ -292,7 +311,7 @@ class TestParseEffortFromLine:
 
 class TestEffortScanner:
     def test_effort_from_content(self) -> None:
-        scanner = _EffortScanner('')
+        scanner = EffortScanner('')
         scanner.process_entry({
             'message': {'content': '<local-command-stdout>Set effort level to high</local-command-stdout>'}
         })
@@ -300,7 +319,7 @@ class TestEffortScanner:
         assert scanner.done
 
     def test_auto_effort_becomes_medium(self) -> None:
-        scanner = _EffortScanner('')
+        scanner = EffortScanner('')
         scanner.process_entry({
             'message': {'content': '<local-command-stdout>Effort level set to auto</local-command-stdout>'}
         })
@@ -308,7 +327,7 @@ class TestEffortScanner:
         assert scanner.done
 
     def test_synthetic_before_effort_invalidates(self) -> None:
-        scanner = _EffortScanner('')
+        scanner = EffortScanner('')
         scanner.process_entry({
             'message': {'model': '<synthetic>', 'content': [{'type': 'text', 'text': 'No response requested.'}]}
         })
@@ -320,14 +339,14 @@ class TestEffortScanner:
         assert scanner.done
 
     def test_api_error_synthetic_does_not_set_flag(self) -> None:
-        scanner = _EffortScanner('')
+        scanner = EffortScanner('')
         scanner.process_entry({
             'message': {'model': '<synthetic>', 'content': [{'type': 'text', 'text': 'API Error: 400'}]}
         })
         assert not scanner.saw_synthetic
 
     def test_since_ts_skips_old_entries(self) -> None:
-        scanner = _EffortScanner('2026-03-15T10:00:00Z')
+        scanner = EffortScanner('2026-03-15T10:00:00Z')
         scanner.process_entry({
             'timestamp': '2026-03-15T09:00:00Z',
             'message': {'content': '<local-command-stdout>Set effort level to max</local-command-stdout>'},
@@ -336,7 +355,7 @@ class TestEffortScanner:
         assert scanner.effort is None
 
     def test_since_ts_processes_new_entries(self) -> None:
-        scanner = _EffortScanner('2026-03-15T10:00:00Z')
+        scanner = EffortScanner('2026-03-15T10:00:00Z')
         scanner.process_entry({
             'timestamp': '2026-03-15T11:00:00Z',
             'message': {'content': '<local-command-stdout>Set effort level to max</local-command-stdout>'},
@@ -344,38 +363,38 @@ class TestEffortScanner:
         assert scanner.effort == 'max'
 
     def test_latest_ts_tracked(self) -> None:
-        scanner = _EffortScanner('')
+        scanner = EffortScanner('')
         scanner.process_entry({'timestamp': '2026-03-15T10:00:00Z', 'message': {'content': 'hello'}})
         scanner.process_entry({'timestamp': '2026-03-15T09:00:00Z', 'message': {'content': 'world'}})
         assert scanner.latest_ts == '2026-03-15T10:00:00Z'
 
     def test_non_string_content_ignored(self) -> None:
-        scanner = _EffortScanner('')
+        scanner = EffortScanner('')
         scanner.process_entry({'message': {'content': [{'type': 'tool_result'}]}})
         assert scanner.effort is None
         assert not scanner.done
 
     def test_initial_state(self) -> None:
-        scanner = _EffortScanner('')
+        scanner = EffortScanner('')
         assert scanner.effort is None
         assert not scanner.saw_synthetic
         assert not scanner.done
         assert not scanner.latest_ts
 
     def test_synthetic_non_list_content(self) -> None:
-        scanner = _EffortScanner('')
+        scanner = EffortScanner('')
         scanner.process_entry({'message': {'model': '<synthetic>', 'content': 'plain text'}})
         assert not scanner.saw_synthetic
 
     def test_synthetic_with_non_matching_text(self) -> None:
-        scanner = _EffortScanner('')
+        scanner = EffortScanner('')
         scanner.process_entry({
             'message': {'model': '<synthetic>', 'content': [{'type': 'text', 'text': 'Something else'}]}
         })
         assert not scanner.saw_synthetic
 
     def test_synthetic_with_non_dict_blocks(self) -> None:
-        scanner = _EffortScanner('')
+        scanner = EffortScanner('')
         scanner.process_entry({'message': {'model': '<synthetic>', 'content': ['not a dict', 42]}})
         assert not scanner.saw_synthetic
 
@@ -532,14 +551,18 @@ class TestResolveEffort:
             result = resolve_effort(None, 'sess-1')
         assert result == 'high'
 
-    def test_no_effort_no_cache_returns_none(self, tmp_path: Path) -> None:
-        with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=tmp_path):
+    def test_no_effort_no_cache_falls_back_to_settings(self, tmp_path: Path) -> None:
+        with (
+            mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=tmp_path),
+            mock.patch('claude_vibeline.statusline.read_settings_effort', return_value='medium?'),
+        ):
             result = resolve_effort(None, 'sess-new')
-        assert result is None
+        assert result == 'medium?'
 
-    def test_no_session_id_returns_none(self) -> None:
-        result = resolve_effort(None, None)
-        assert result is None
+    def test_no_session_id_falls_back_to_settings(self) -> None:
+        with mock.patch('claude_vibeline.statusline.read_settings_effort', return_value='medium?'):
+            result = resolve_effort(None, None)
+        assert result == 'medium?'
 
     def test_scan_beats_cached_effort(self, tmp_path: Path) -> None:
         cache_dir = tmp_path / 'cache'
@@ -567,7 +590,7 @@ class TestResolveEffort:
         transcript.write_text(old_entry + '\n' + new_entry + '\n')
         cache_dir = tmp_path / 'cache'
         cache_dir.mkdir()
-        (cache_dir / 'sess-1.json').write_text(json.dumps({'effort': 'low', 'ts': '2026-03-15T10:00:00Z'}))
+        (cache_dir / 'sess-1.json').write_text(json.dumps({'effort': 'low', 'effort_ts': '2026-03-15T10:00:00Z'}))
         with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=cache_dir):
             result = resolve_effort(str(transcript), 'sess-1')
         assert result == 'max'
@@ -576,7 +599,7 @@ class TestResolveEffort:
         cache_dir = tmp_path / 'cache'
         cache_dir.mkdir()
         (cache_dir / 'sess-1.json').write_text(
-            json.dumps({'effort': 'high', 'ts': '2026-03-15T10:00:00Z', '_v': app_version})
+            json.dumps({'effort': 'high', 'effort_ts': '2026-03-15T10:00:00Z', '_v': app_version})
         )
         transcript = tmp_path / 'session.jsonl'
         entry = json.dumps({'type': 'user', 'timestamp': '2026-03-15T11:00:00Z', 'message': {'content': 'hello'}})
@@ -596,9 +619,12 @@ class TestResolveEffort:
             'message': {'model': '<synthetic>', 'content': [{'type': 'text', 'text': 'No response requested.'}]},
         })
         transcript.write_text(synthetic + '\n')
-        with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=cache_dir):
+        with (
+            mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=cache_dir),
+            mock.patch('claude_vibeline.statusline.read_settings_effort', return_value='medium?'),
+        ):
             result = resolve_effort(str(transcript), 'sess-1')
-        assert result is None
+        assert result == 'medium?'
 
 
 class TestReadSettingsEffort:
@@ -606,23 +632,23 @@ class TestReadSettingsEffort:
         settings = tmp_path / 'settings.json'
         settings.write_text(json.dumps({'effortLevel': 'low'}))
         with mock.patch.object(Path, 'expanduser', return_value=settings):
-            assert read_settings_effort() == 'low'
+            assert read_settings_effort() == 'low?'
 
     def test_missing_file(self, tmp_path: Path) -> None:
         with mock.patch.object(Path, 'expanduser', return_value=tmp_path / 'nonexistent.json'):
-            assert read_settings_effort() == 'medium'
+            assert read_settings_effort() == 'medium?'
 
     def test_invalid_json(self, tmp_path: Path) -> None:
         settings = tmp_path / 'settings.json'
         settings.write_text('{bad')
         with mock.patch.object(Path, 'expanduser', return_value=settings):
-            assert read_settings_effort() == 'medium'
+            assert read_settings_effort() == 'medium?'
 
     def test_no_effort_key(self, tmp_path: Path) -> None:
         settings = tmp_path / 'settings.json'
         settings.write_text(json.dumps({'model': 'opus'}))
         with mock.patch.object(Path, 'expanduser', return_value=settings):
-            assert read_settings_effort() == 'medium'
+            assert read_settings_effort() == 'medium?'
 
 
 class TestSessionCache:
@@ -662,6 +688,14 @@ class TestSessionCache:
         (tmp_path / 'bad.json').write_text('{bad json')
         with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=tmp_path):
             assert read_session_cache('bad') == {}
+
+    def test_write_merges_fields(self, tmp_path: Path) -> None:
+        with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=tmp_path):
+            write_session_cache('sess-1', {'effort': 'high'})
+            write_session_cache('sess-1', {'last_user_ts': 1000.0})
+            cached = read_session_cache('sess-1')
+            assert cached['effort'] == 'high'
+            assert cached['last_user_ts'] == 1000.0  # noqa: RUF069 - exact roundtrip via JSON
 
 
 class TestCleanupSessionCache:
@@ -792,7 +826,7 @@ class TestFetchUsage:
 
     def test_cached_response_within_ttl(self, tmp_path: Path) -> None:
         cache = tmp_path / 'usage.json'
-        cached = {'five_hour': {'utilization': 10}, '_ts': time.time()}
+        cached = {'five_hour': {'utilization': 10}, '_ts': time.time(), '_v': app_version}
         cache.write_text(json.dumps(cached))
 
         with mock.patch('claude_vibeline.statusline.cache_path', return_value=cache):
@@ -863,7 +897,7 @@ class TestFetchUsage:
     @responses.activate
     def test_stale_cache_on_api_error(self, tmp_path: Path) -> None:
         cache = tmp_path / 'usage.json'
-        old_data = {'five_hour': {'utilization': 10}, '_ts': time.time() - CACHE_TTL_SECONDS - 1}
+        old_data = {'five_hour': {'utilization': 10}, '_ts': time.time() - CACHE_TTL_SECONDS - 1, '_v': app_version}
         cache.write_text(json.dumps(old_data))
 
         responses.add(responses.GET, USAGE_URL, status=500)
@@ -880,7 +914,7 @@ class TestFetchUsage:
 
     def test_stale_cache_on_no_token(self, tmp_path: Path) -> None:
         cache = tmp_path / 'usage.json'
-        old_data = {'five_hour': {'utilization': 30}, '_ts': time.time() - CACHE_TTL_SECONDS - 1}
+        old_data = {'five_hour': {'utilization': 30}, '_ts': time.time() - CACHE_TTL_SECONDS - 1, '_v': app_version}
         cache.write_text(json.dumps(old_data))
 
         with (
@@ -1155,7 +1189,7 @@ class TestMain:
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
             output = run_main(stdin_data=data)
         assert 'cache' in output
-        assert '\u25cf' in output
+        assert '\u2713' in output
 
     def test_cache_expired_shown(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
@@ -1166,7 +1200,7 @@ class TestMain:
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
             output = run_main(stdin_data=data)
         assert 'cache' in output
-        assert '\u25cb' in output
+        assert '\u2717' in output
 
     def test_no_cache_flag(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
@@ -1190,12 +1224,9 @@ class TestMain:
         assert '\033[' not in entry['output']
         assert entry['effort'] == 'high'
 
-    def test_none_effort_shows_settings_fallback(self) -> None:
-        with (
-            mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)),
-            mock.patch('claude_vibeline.statusline.read_settings_effort', return_value='high'),
-        ):
-            output = run_main(effort=None)
+    def test_fallback_effort_shows_question_mark(self) -> None:
+        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
+            output = run_main(effort='high?')
         assert 'Opus 4.6' in output
         assert '(high?)' in output
 
@@ -1227,6 +1258,19 @@ class TestWriteDebugLog:
             write_debug_log('test output', args)
         size = log_file.stat().st_size
         assert size < DEBUG_LOG_MAX_BYTES
+
+    def test_truncation_preserves_jsonl_structure(self, tmp_path: Path) -> None:
+        log_file = tmp_path / 'debug.log'
+        lines: list[str] = []
+        while sum(len(ln) for ln in lines) < DEBUG_LOG_MAX_BYTES + 1000:
+            lines.append(json.dumps({'i': len(lines), 'pad': 'x' * 200}) + '\n')
+        log_file.write_text(''.join(lines))
+        args = Args(debug=True)
+        with mock.patch('claude_vibeline.statusline.debug_log_path', return_value=log_file):
+            write_debug_log('test output', args)
+        content = log_file.read_text(encoding='utf-8')
+        for line in content.strip().splitlines():
+            json.loads(line)
 
     def test_jsonl_format_with_args(self, tmp_path: Path) -> None:
         log_file = tmp_path / 'debug.log'
@@ -1287,41 +1331,6 @@ class TestWriteDebugLog:
         assert entry['output'] == 'a b'
 
 
-class TestReadLastUserTimestamp:
-    def test_valid_transcript(self, tmp_path: Path) -> None:
-        transcript = tmp_path / 'session.jsonl'
-        lines = [_assistant('2026-03-07T10:00:00Z'), _user('2026-03-07T10:01:00Z'), _assistant('2026-03-07T10:01:30Z')]
-        transcript.write_text('\n'.join(lines) + '\n')
-
-        result = read_last_user_timestamp(str(transcript))
-        assert result is not None
-        expected = datetime.fromisoformat('2026-03-07T10:01:00Z').timestamp()
-        assert abs(result - expected) < 1
-
-    def test_no_user_messages(self, tmp_path: Path) -> None:
-        transcript = tmp_path / 'session.jsonl'
-        transcript.write_text(_assistant('2026-03-07T10:00:00Z') + '\n')
-        assert read_last_user_timestamp(str(transcript)) is None
-
-    def test_missing_file(self) -> None:
-        assert read_last_user_timestamp('/nonexistent/path.jsonl') is None
-
-    def test_empty_file(self, tmp_path: Path) -> None:
-        transcript = tmp_path / 'session.jsonl'
-        transcript.write_text('')
-        assert read_last_user_timestamp(str(transcript)) is None
-
-    def test_corrupt_jsonl(self, tmp_path: Path) -> None:
-        transcript = tmp_path / 'session.jsonl'
-        transcript.write_text('{bad json\n')
-        assert read_last_user_timestamp(str(transcript)) is None
-
-    def test_missing_timestamp_field(self, tmp_path: Path) -> None:
-        transcript = tmp_path / 'session.jsonl'
-        transcript.write_text(json.dumps({'type': 'user'}) + '\n')
-        assert read_last_user_timestamp(str(transcript)) is None
-
-
 def _user(ts: str) -> str:
     return json.dumps({'type': 'user', 'timestamp': ts, 'message': {'content': 'hello'}})
 
@@ -1374,14 +1383,6 @@ class TestReadUserTimestamps:
 
         _, last_user_idx = read_user_timestamps(str(transcript))
         assert last_user_idx == 0
-
-    def test_read_last_user_timestamps_limits(self, tmp_path: Path) -> None:
-        transcript = tmp_path / 'session.jsonl'
-        lines = [_user('2026-03-07T10:00:00Z'), _user('2026-03-07T10:01:00Z'), _user('2026-03-07T10:02:00Z')]
-        transcript.write_text('\n'.join(lines) + '\n')
-
-        assert len(read_last_user_timestamps(str(transcript))) == 2
-        assert len(read_last_user_timestamps(str(transcript), count=1)) == 1
 
     def test_single_user_message(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
@@ -1469,28 +1470,38 @@ class TestHasCacheGap:
 
 class TestPromptCacheSection:
     def test_no_transcript(self) -> None:
-        assert prompt_cache_section(None) is None
+        assert prompt_cache_section(None) == (None, None)
 
     def test_warm_cache(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
         ts = datetime.now(UTC).isoformat()
         transcript.write_text(_user(ts) + '\n')
 
-        result = prompt_cache_section(str(transcript))
+        result, _ = prompt_cache_section(str(transcript))
         assert result is not None
         assert 'cache' in result
-        assert '\u25cf' in result
-        assert ':' in result
+        assert '\u2713' in result
+        assert 'm' in result
+
+    def test_warm_cache_low(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        ts = (datetime.now(UTC) - timedelta(seconds=PROMPT_CACHE_TTL - CACHE_LOW_THRESHOLD + 10)).isoformat()
+        transcript.write_text(_user(ts) + '\n')
+
+        result, _ = prompt_cache_section(str(transcript))
+        assert result is not None
+        assert '\u26a0' in result
+        assert '\u2713' not in result
 
     def test_expired_cache(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
         old_ts = (datetime.now(UTC) - timedelta(seconds=PROMPT_CACHE_TTL + 10)).isoformat()
         transcript.write_text(_user(old_ts) + '\n')
 
-        result = prompt_cache_section(str(transcript))
+        result, _ = prompt_cache_section(str(transcript))
         assert result is not None
-        assert '\u25cb' in result
-        assert ':' in result
+        assert '\u2717' in result
+        assert 'm' not in ANSI_RE.sub('', result).split('\u2717')[-1]
 
     def test_recached_after_gap(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
@@ -1500,11 +1511,11 @@ class TestPromptCacheSection:
         lines = [_user(user_ts), _assistant(user_ts), _tool_result(recent_ts)]
         transcript.write_text('\n'.join(lines) + '\n')
 
-        result = prompt_cache_section(str(transcript))
+        result, _ = prompt_cache_section(str(transcript))
         assert result is not None
-        assert '\u21bb' in result
-        assert '\u25cb' not in result
-        assert ':' in result
+        assert '!' in result
+        assert '\u2713' in result
+        assert '\u2717' not in result
 
     def test_no_recache_indicator_when_no_gap(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
@@ -1514,20 +1525,20 @@ class TestPromptCacheSection:
         lines = [_user(user_ts), _assistant(user_ts), _tool_result(recent_ts)]
         transcript.write_text('\n'.join(lines) + '\n')
 
-        result = prompt_cache_section(str(transcript))
+        result, _ = prompt_cache_section(str(transcript))
         assert result is not None
-        assert '\u25cf' in result
-        assert '\u21bb' not in result
-        assert '\u25cb' not in result
+        assert '\u2713' in result
+        assert '!' not in result
+        assert '\u2717' not in result
 
     def test_no_recache_indicator_single_message(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
         ts = datetime.now(UTC).isoformat()
         transcript.write_text(_user(ts) + '\n')
 
-        result = prompt_cache_section(str(transcript))
+        result, _ = prompt_cache_section(str(transcript))
         assert result is not None
-        assert '\u21bb' not in result
+        assert '!' not in result
 
     def test_gap_before_user_ignored(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
@@ -1541,10 +1552,10 @@ class TestPromptCacheSection:
         ]
         transcript.write_text('\n'.join(lines) + '\n')
 
-        result = prompt_cache_section(str(transcript))
+        result, _ = prompt_cache_section(str(transcript))
         assert result is not None
-        assert '\u25cf' in result
-        assert '\u21bb' not in result
+        assert '\u2713' in result
+        assert '!' not in result
 
     def test_gap_after_user_shows_recached(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
@@ -1558,14 +1569,332 @@ class TestPromptCacheSection:
         ]
         transcript.write_text('\n'.join(lines) + '\n')
 
-        result = prompt_cache_section(str(transcript))
+        result, _ = prompt_cache_section(str(transcript))
         assert result is not None
-        assert '\u21bb' in result
+        assert '!' in result
 
     def test_no_user_messages(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
         transcript.write_text(_assistant('2026-03-07T10:00:00Z') + '\n')
-        assert prompt_cache_section(str(transcript)) is None
+        assert prompt_cache_section(str(transcript)) == (None, None)
+
+    def test_caches_last_user_ts(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        ts = datetime.now(UTC).isoformat()
+        transcript.write_text(_user(ts) + '\n')
+        cache_dir = tmp_path / 'cache'
+        cache_dir.mkdir()
+        with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=cache_dir):
+            _, last_ts = prompt_cache_section(str(transcript), 'sess-1')
+            assert last_ts is not None
+            cached = read_session_cache('sess-1')
+            assert cached['last_user_ts'] == last_ts
+
+    def test_falls_back_to_cached_last_user_ts(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        transcript.write_text(_assistant('2026-03-07T10:00:00Z') + '\n')
+        cache_dir = tmp_path / 'cache'
+        cache_dir.mkdir()
+        cached_ts = time.time() - 60
+        (cache_dir / 'sess-1.json').write_text(json.dumps({'last_user_ts': cached_ts, '_v': app_version}))
+        with mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=cache_dir):
+            result, last_ts = prompt_cache_section(str(transcript), 'sess-1')
+        assert last_ts == cached_ts
+        assert result is not None
+        assert '\u2713' in result
+
+
+class TestToggleSettingsSpace:
+    def _settings_json(self, cmd: str) -> str:
+        return json.dumps({'statusLine': {'type': 'command', 'command': cmd}}, indent=2) + '\n'
+
+    def _read_cmd(self, settings: Path) -> str:
+        return json.loads(settings.read_text(encoding='utf-8'))['statusLine']['command']
+
+    def test_adds_trailing_space(self, tmp_path: Path) -> None:
+        settings = tmp_path / 'settings.json'
+        settings.write_text(self._settings_json('uv run foo'), encoding='utf-8')
+        with mock.patch.object(Path, 'expanduser', return_value=settings):
+            toggle_settings_space()
+        assert self._read_cmd(settings) == 'uv run foo '
+
+    def test_removes_trailing_space(self, tmp_path: Path) -> None:
+        settings = tmp_path / 'settings.json'
+        settings.write_text(self._settings_json('uv run foo '), encoding='utf-8')
+        with mock.patch.object(Path, 'expanduser', return_value=settings):
+            toggle_settings_space()
+        assert self._read_cmd(settings) == 'uv run foo'
+
+    def test_preserves_other_content(self, tmp_path: Path) -> None:
+        settings = tmp_path / 'settings.json'
+        data = {'model': 'opus', 'statusLine': {'type': 'command', 'command': 'cmd'}, 'debug': True}
+        settings.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
+        with mock.patch.object(Path, 'expanduser', return_value=settings):
+            toggle_settings_space()
+        result = json.loads(settings.read_text())
+        assert result['model'] == 'opus'
+        assert result['debug'] is True
+        assert result['statusLine']['command'] == 'cmd '
+
+    def test_no_status_line(self, tmp_path: Path) -> None:
+        settings = tmp_path / 'settings.json'
+        settings.write_text('{"model": "opus"}\n', encoding='utf-8')
+        with mock.patch.object(Path, 'expanduser', return_value=settings):
+            toggle_settings_space()
+        assert json.loads(settings.read_text()) == {'model': 'opus'}
+
+    def test_only_modifies_status_line_command(self, tmp_path: Path) -> None:
+        settings = tmp_path / 'settings.json'
+        data = {'hooks': {'command': 'hook cmd'}, 'statusLine': {'type': 'command', 'command': 'sl cmd'}}
+        settings.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
+        with mock.patch.object(Path, 'expanduser', return_value=settings):
+            toggle_settings_space()
+        result = json.loads(settings.read_text())
+        assert result['hooks']['command'] == 'hook cmd'
+        assert result['statusLine']['command'] == 'sl cmd '
+
+    def test_missing_file(self, tmp_path: Path) -> None:
+        with mock.patch.object(Path, 'expanduser', return_value=tmp_path / 'nonexistent.json'):
+            toggle_settings_space()
+
+
+class TestIsLockOwner:
+    def test_owns_lock(self, tmp_path: Path) -> None:
+        lock = tmp_path / 'refresh.lock'
+        lock.write_text(json.dumps({'token': 'abc123', '_v': app_version}))
+        assert is_lock_owner(lock, 'abc123')
+
+    def test_different_token(self, tmp_path: Path) -> None:
+        lock = tmp_path / 'refresh.lock'
+        lock.write_text(json.dumps({'token': 'abc123'}))
+        assert not is_lock_owner(lock, 'other')
+
+    def test_no_lock_file(self, tmp_path: Path) -> None:
+        assert not is_lock_owner(tmp_path / 'nonexistent.lock', 'abc')
+
+    def test_corrupt_lock(self, tmp_path: Path) -> None:
+        lock = tmp_path / 'refresh.lock'
+        lock.write_text('{bad')
+        assert not is_lock_owner(lock, 'abc')
+
+
+class TestRunRefreshLoop:
+    TOKEN: ClassVar[str] = 'test-token'
+
+    def test_already_expired(self, tmp_path: Path, monkeypatch: Any) -> None:
+        lock = tmp_path / 'refresh.lock'
+        lock.write_text(json.dumps({'token': self.TOKEN, '_v': app_version}))
+        monkeypatch.setattr('claude_vibeline.statusline.refresh_lock_path', lambda: lock)
+        toggles: list[int] = []
+        monkeypatch.setattr('claude_vibeline.statusline.toggle_settings_space', lambda: toggles.append(1))
+        with mock.patch('time.sleep'):
+            run_refresh_loop(time.time() - 1, self.TOKEN)
+        assert len(toggles) == 0
+        assert not lock.exists()
+
+    def test_exits_when_lock_taken_mid_loop(self, tmp_path: Path, monkeypatch: Any) -> None:
+        lock = tmp_path / 'refresh.lock'
+        lock.write_text(json.dumps({'token': self.TOKEN, '_v': app_version}))
+        monkeypatch.setattr('claude_vibeline.statusline.refresh_lock_path', lambda: lock)
+        toggles: list[int] = []
+
+        def toggle_and_steal_lock() -> None:
+            toggles.append(1)
+            lock.write_text(json.dumps({'token': 'new-owner'}))
+
+        monkeypatch.setattr('claude_vibeline.statusline.toggle_settings_space', toggle_and_steal_lock)
+        times = iter([100.0, 130.0])
+        monkeypatch.setattr(time, 'time', lambda: next(times))
+        with mock.patch('time.sleep'):
+            run_refresh_loop(200.0, self.TOKEN)
+        assert len(toggles) == 1
+        assert lock.exists()
+
+    def test_loop_toggles_and_cleans_up(self, tmp_path: Path, monkeypatch: Any) -> None:
+        lock = tmp_path / 'refresh.lock'
+        lock.write_text(json.dumps({'token': self.TOKEN, '_v': app_version}))
+        monkeypatch.setattr('claude_vibeline.statusline.refresh_lock_path', lambda: lock)
+        toggles: list[int] = []
+        monkeypatch.setattr('claude_vibeline.statusline.toggle_settings_space', lambda: toggles.append(1))
+        # time.time() called once per iteration (remaining calc)
+        # iter 1: 150-100=50>0 → toggle; iter 2: 150-130=20>0 → toggle
+        # iter 3: 150-160<0 → break (no extra toggle)
+        times = iter([100.0, 130.0, 160.0])
+        monkeypatch.setattr(time, 'time', lambda: next(times))
+        with mock.patch('time.sleep'):
+            run_refresh_loop(150.0, self.TOKEN)
+        assert len(toggles) == 2
+        assert not lock.exists()
+
+
+class TestSpawnCacheUpdater:
+    def test_spawns_and_writes_lock(self, tmp_path: Path, monkeypatch: Any) -> None:
+        monkeypatch.setattr('claude_vibeline.statusline.refresh_lock_path', lambda: tmp_path / 'refresh.lock')
+        mock_proc = mock.MagicMock(pid=12345)
+        with mock.patch('claude_vibeline.statusline.sp.Popen', return_value=mock_proc) as popen:
+            spawn_cache_updater(time.time() + 300)
+            popen.assert_called_once()
+        lock = tmp_path / 'refresh.lock'
+        assert lock.exists()
+        data = json.loads(lock.read_text())
+        assert 'token' in data
+        assert 'expiry' in data
+
+    def test_skips_when_same_expiry(self, tmp_path: Path, monkeypatch: Any) -> None:
+        lock = tmp_path / 'refresh.lock'
+        expiry = time.time() + 300
+        lock.write_text(json.dumps({'token': 'old', 'expiry': expiry, '_v': app_version}))
+        monkeypatch.setattr('claude_vibeline.statusline.refresh_lock_path', lambda: lock)
+        with mock.patch('claude_vibeline.statusline.sp.Popen') as popen:
+            spawn_cache_updater(expiry)
+            popen.assert_not_called()
+        assert json.loads(lock.read_text())['token'] == 'old'
+
+    def test_skips_when_expiry_earlier(self, tmp_path: Path, monkeypatch: Any) -> None:
+        lock = tmp_path / 'refresh.lock'
+        expiry = time.time() + 300
+        lock.write_text(json.dumps({'token': 'old', 'expiry': expiry, '_v': app_version}))
+        monkeypatch.setattr('claude_vibeline.statusline.refresh_lock_path', lambda: lock)
+        with mock.patch('claude_vibeline.statusline.sp.Popen') as popen:
+            spawn_cache_updater(expiry - 5)
+            popen.assert_not_called()
+
+    def test_spawns_when_expiry_changed(self, tmp_path: Path, monkeypatch: Any) -> None:
+        lock = tmp_path / 'refresh.lock'
+        old_expiry = time.time() + 100
+        new_expiry = time.time() + 400
+        lock.write_text(json.dumps({'token': 'old', 'expiry': old_expiry}))
+        monkeypatch.setattr('claude_vibeline.statusline.refresh_lock_path', lambda: lock)
+        mock_proc = mock.MagicMock(pid=55555)
+        with mock.patch('claude_vibeline.statusline.sp.Popen', return_value=mock_proc):
+            spawn_cache_updater(new_expiry)
+        data = json.loads(lock.read_text())
+        assert data['token'] != 'old'
+        assert data['expiry'] == new_expiry
+
+    def test_spawns_when_no_lock(self, tmp_path: Path, monkeypatch: Any) -> None:
+        monkeypatch.setattr('claude_vibeline.statusline.refresh_lock_path', lambda: tmp_path / 'refresh.lock')
+        mock_proc = mock.MagicMock(pid=12345)
+        with mock.patch('claude_vibeline.statusline.sp.Popen', return_value=mock_proc):
+            spawn_cache_updater(time.time() + 300)
+        assert (tmp_path / 'refresh.lock').exists()
+
+    def test_spawns_when_corrupt_lock(self, tmp_path: Path, monkeypatch: Any) -> None:
+        lock = tmp_path / 'refresh.lock'
+        lock.write_text('{bad')
+        monkeypatch.setattr('claude_vibeline.statusline.refresh_lock_path', lambda: lock)
+        mock_proc = mock.MagicMock(pid=12345)
+        with mock.patch('claude_vibeline.statusline.sp.Popen', return_value=mock_proc):
+            spawn_cache_updater(time.time() + 300)
+        assert 'token' in json.loads(lock.read_text())
+
+    def test_handles_oserror(self, tmp_path: Path, monkeypatch: Any) -> None:
+        monkeypatch.setattr('claude_vibeline.statusline.refresh_lock_path', lambda: tmp_path / 'refresh.lock')
+        with mock.patch('claude_vibeline.statusline.sp.Popen', side_effect=OSError):
+            spawn_cache_updater(time.time() + 300)
+        assert not (tmp_path / 'refresh.lock').exists()
+
+
+class TestRefreshIntegration:
+    """
+    Integration tests for the cache refresh mechanism.
+
+    Uses real files and threads instead of mocks.
+    """
+
+    def test_toggle_only_modifies_statusline_command(self, tmp_path: Path) -> None:
+        settings = tmp_path / 'settings.json'
+        data = {
+            'hooks': {'UserPromptSubmit': [{'hooks': [{'type': 'command', 'command': 'bash hook.sh'}]}]},
+            'statusLine': {'type': 'command', 'command': 'run statusline'},
+            'model': 'opus',
+        }
+        settings.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
+        with mock.patch.object(Path, 'expanduser', return_value=settings):
+            toggle_settings_space()
+        result = json.loads(settings.read_text(encoding='utf-8'))
+        assert result['statusLine']['command'] == 'run statusline '
+        assert result['hooks']['UserPromptSubmit'][0]['hooks'][0]['command'] == 'bash hook.sh'
+
+    def test_toggle_is_reversible(self, tmp_path: Path) -> None:
+        settings = tmp_path / 'settings.json'
+        original = {'statusLine': {'type': 'command', 'command': 'my cmd'}}
+        settings.write_text(json.dumps(original, indent=2) + '\n', encoding='utf-8')
+        with mock.patch.object(Path, 'expanduser', return_value=settings):
+            toggle_settings_space()
+            assert json.loads(settings.read_text(encoding='utf-8'))['statusLine']['command'] == 'my cmd '
+            toggle_settings_space()
+            assert json.loads(settings.read_text(encoding='utf-8'))['statusLine']['command'] == 'my cmd'
+
+    def test_refresh_loop_toggles_settings(self, tmp_path: Path, monkeypatch: Any) -> None:
+        settings = tmp_path / 'settings.json'
+        data = {'statusLine': {'type': 'command', 'command': 'cmd'}}
+        settings.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
+        token = 'test-token'
+        lock = tmp_path / 'refresh.lock'
+        lock.write_text(json.dumps({'token': token, '_v': app_version}))
+        monkeypatch.setattr('claude_vibeline.statusline.refresh_lock_path', lambda: lock)
+        monkeypatch.setattr('claude_vibeline.statusline.REFRESH_INTERVAL', 0.1)
+        with mock.patch.object(Path, 'expanduser', return_value=settings):
+            t = threading.Thread(target=run_refresh_loop, args=(time.time() + 0.5, token))
+            t.start()
+            t.join(timeout=5)
+        result = json.loads(settings.read_text(encoding='utf-8'))
+        assert result['statusLine']['command'] in {'cmd', 'cmd '}
+        assert not lock.exists()
+
+    def test_cooperative_shutdown_on_token_change(self, tmp_path: Path, monkeypatch: Any) -> None:
+        settings = tmp_path / 'settings.json'
+        data = {'statusLine': {'type': 'command', 'command': 'cmd'}}
+        settings.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
+        token = 'old-token'
+        lock = tmp_path / 'refresh.lock'
+        lock.write_text(json.dumps({'token': token, '_v': app_version}))
+        monkeypatch.setattr('claude_vibeline.statusline.refresh_lock_path', lambda: lock)
+        monkeypatch.setattr('claude_vibeline.statusline.REFRESH_INTERVAL', 0.2)
+        with mock.patch.object(Path, 'expanduser', return_value=settings):
+            t = threading.Thread(target=run_refresh_loop, args=(time.time() + 10, token))
+            t.start()
+            time.sleep(0.3)
+            assert t.is_alive()
+            lock.write_text(json.dumps({'token': 'new-owner'}))
+            t.join(timeout=3)
+        assert not t.is_alive()
+
+    def test_same_expiry_does_not_respawn(self, tmp_path: Path, monkeypatch: Any) -> None:
+        lock = tmp_path / 'refresh.lock'
+        expiry = time.time() + 300
+        lock.write_text(json.dumps({'token': 'existing', 'expiry': expiry, '_v': app_version}))
+        monkeypatch.setattr('claude_vibeline.statusline.refresh_lock_path', lambda: lock)
+        with mock.patch('claude_vibeline.statusline.sp.Popen') as popen:
+            spawn_cache_updater(expiry)
+            popen.assert_not_called()
+
+    def test_different_expiry_does_respawn(self, tmp_path: Path, monkeypatch: Any) -> None:
+        lock = tmp_path / 'refresh.lock'
+        old_expiry = time.time() + 100
+        lock.write_text(json.dumps({'token': 'old', 'expiry': old_expiry}))
+        monkeypatch.setattr('claude_vibeline.statusline.refresh_lock_path', lambda: lock)
+        mock_proc = mock.MagicMock(pid=55555)
+        with mock.patch('claude_vibeline.statusline.sp.Popen', return_value=mock_proc):
+            spawn_cache_updater(time.time() + 400)
+        data = json.loads(lock.read_text())
+        assert data['token'] != 'old'
+
+    def test_lock_cleaned_after_expiry(self, tmp_path: Path, monkeypatch: Any) -> None:
+        settings = tmp_path / 'settings.json'
+        data = {'statusLine': {'type': 'command', 'command': 'cmd'}}
+        settings.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
+        token = 'test-token'
+        lock = tmp_path / 'refresh.lock'
+        lock.write_text(json.dumps({'token': token, '_v': app_version}))
+        monkeypatch.setattr('claude_vibeline.statusline.refresh_lock_path', lambda: lock)
+        monkeypatch.setattr('claude_vibeline.statusline.REFRESH_INTERVAL', 0.1)
+        with mock.patch.object(Path, 'expanduser', return_value=settings):
+            t = threading.Thread(target=run_refresh_loop, args=(time.time() + 0.2, token))
+            t.start()
+            t.join(timeout=5)
+        assert not lock.exists()
 
 
 class TestChunkedTranscriptReading:
@@ -1720,15 +2049,13 @@ class TestModelSection:
         assert 'Haiku' in result
         assert '(' not in result
 
-    def test_none_effort_shows_settings_fallback(self) -> None:
-        with mock.patch('claude_vibeline.statusline.read_settings_effort', return_value='high'):
-            result = model_section('Opus 4.6', None)
+    def test_fallback_effort_shows_question_mark(self) -> None:
+        result = model_section('Opus 4.6', 'high?')
         assert 'Opus 4.6' in result
         assert '(high?)' in result
 
-    def test_unsupported_settings_effort_defaults_to_medium(self) -> None:
-        with mock.patch('claude_vibeline.statusline.read_settings_effort', return_value='max'):
-            result = model_section('Sonnet 4.6', None)
+    def test_unsupported_fallback_effort_defaults_to_medium(self) -> None:
+        result = model_section('Sonnet 4.6', 'max?')
         assert '(medium?)' in result
 
     def test_unknown_model_skips_effort(self) -> None:
