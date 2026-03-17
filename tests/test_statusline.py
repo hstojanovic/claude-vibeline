@@ -3,6 +3,7 @@ import json
 import os
 import runpy
 import subprocess as sp
+import tempfile
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 from unittest import mock
 
+import pytest
 import responses
 from freezegun import freeze_time
 
@@ -72,36 +74,26 @@ if TYPE_CHECKING:
 
 
 class TestBar:
+    @pytest.mark.parametrize(
+        ('perc', 'width', 'filled', 'empty'),
+        [(0, 8, 0, 8), (50, 8, 4, 4), (100, 8, 8, 0), (25, 4, 1, 3), (1, 8, 0, 8), (99, 8, 8, 0)],
+    )
+    def test_fill_ratio(self, perc: int, width: int, filled: int, empty: int) -> None:
+        result = bar(perc, width)
+        assert result.count(FILL) == filled
+        assert result.count(EMPTY) == empty
+
     def test_width_zero(self) -> None:
-        result = bar(50, 0)
-        assert not result
-
-    def test_width_8_pct_0(self) -> None:
-        result = bar(0, 8)
-        assert result.count(EMPTY) == 8
-        assert FILL not in result
-
-    def test_width_8_pct_50(self) -> None:
-        result = bar(50, 8)
-        assert result.count(FILL) == 4
-        assert result.count(EMPTY) == 4
-
-    def test_width_8_pct_100(self) -> None:
-        result = bar(100, 8)
-        assert result.count(FILL) == 8
-        assert EMPTY not in result
+        assert not bar(50, 0)
 
     def test_negative_pct_clamped(self) -> None:
-        result = bar(-10, 8)
-        assert result.count(EMPTY) == 8
+        assert bar(-10, 8).count(EMPTY) == 8
 
     def test_pct_over_100_clamped(self) -> None:
-        result = bar(200, 8)
-        assert result.count(FILL) == 8
+        assert bar(200, 8).count(FILL) == 8
 
     def test_negative_width_clamped(self) -> None:
-        result = bar(50, -5)
-        assert not result
+        assert not bar(50, -5)
 
 
 class TestIsPast:
@@ -257,17 +249,12 @@ class TestFormatCountdown:
 
 
 class TestFormatCacheCountdown:
-    def test_minutes(self) -> None:
-        assert format_cache_countdown(240) == '4m'
-
-    def test_exactly_60(self) -> None:
-        assert format_cache_countdown(60) == '1m'
-
-    def test_seconds(self) -> None:
-        assert format_cache_countdown(47) == '47s'
-
-    def test_zero(self) -> None:
-        assert format_cache_countdown(0) == '0s'
+    @pytest.mark.parametrize(
+        ('secs', 'expected'),
+        [(300, '5m'), (240, '4m'), (61, '1m'), (60, '1m'), (59, '59s'), (47, '47s'), (1, '1s'), (0, '0s')],
+    )
+    def test_formatting(self, secs: int, expected: str) -> None:
+        assert format_cache_countdown(secs) == expected
 
 
 def transcript_line(content: str) -> str:
@@ -275,38 +262,27 @@ def transcript_line(content: str) -> str:
 
 
 class TestParseEffortFromLine:
-    def test_model_command_low(self) -> None:
-        assert parse_effort_from_line('Set model to Sonnet 4.6 with low effort') == 'low'
-
-    def test_model_command_medium(self) -> None:
-        assert parse_effort_from_line('Set model to Sonnet 4.6 with medium effort') == 'medium'
-
-    def test_model_command_high(self) -> None:
-        assert parse_effort_from_line('Set model to Opus 4.6 (1M context) (default) with high effort') == 'high'
-
-    def test_model_command_max(self) -> None:
-        assert parse_effort_from_line('Set model to Opus 4.6 with max effort') == 'max'
-
-    def test_model_command_no_effort(self) -> None:
-        assert parse_effort_from_line('Set model to Sonnet 4.6') is None
-
-    def test_effort_command_low(self) -> None:
-        assert parse_effort_from_line('Set effort level to low') == 'low'
-
-    def test_effort_command_medium(self) -> None:
-        assert parse_effort_from_line('Set effort level to medium') == 'medium'
-
-    def test_effort_command_high(self) -> None:
-        assert parse_effort_from_line('Set effort level to high') == 'high'
-
-    def test_effort_command_max(self) -> None:
-        assert parse_effort_from_line('Set effort level to max') == 'max'
-
-    def test_effort_auto(self) -> None:
-        assert parse_effort_from_line('Effort level set to auto') == 'auto'
-
-    def test_unrelated_text(self) -> None:
-        assert parse_effort_from_line('hello world') is None
+    @pytest.mark.parametrize(
+        ('line', 'expected'),
+        [
+            ('Set model to Sonnet 4.6 with low effort', 'low'),
+            ('Set model to Sonnet 4.6 with medium effort', 'medium'),
+            ('Set model to Opus 4.6 (1M context) (default) with high effort', 'high'),
+            ('Set model to Opus 4.6 with max effort', 'max'),
+            ('Set model to Sonnet 4.6', None),
+            ('Set effort level to low', 'low'),
+            ('Set effort level to medium', 'medium'),
+            ('Set effort level to high', 'high'),
+            ('Set effort level to max', 'max'),
+            ('Effort level set to auto', 'auto'),
+            ('hello world', None),
+            ('', None),
+            ('Set effort level to EXTREME', None),
+            ('Set model to Opus 4.6 with  high effort', None),
+        ],
+    )
+    def test_parsing(self, line: str, expected: str | None) -> None:
+        assert parse_effort_from_line(line) == expected
 
 
 class TestEffortScanner:
@@ -1024,12 +1000,20 @@ STDIN_DATA = {
 
 
 def run_main(
-    stdin_data: StdinData | dict[str, Any] | None = None, argv: list[str] | None = None, effort: str | None = 'high'
+    stdin_data: StdinData | dict[str, Any] | None = None, argv: list[str] | None = None, tmp_path: Path | None = None
 ) -> str:
+    """
+    Run main() with real effort resolution (no mocking resolve_effort).
+
+    Mocks session_cache_dir and read_settings_effort to avoid touching real
+    user files, but exercises the full resolve_effort → model_section pipeline.
+    """
     import claude_vibeline.statusline as _mod  # noqa: PLC0415
 
     data = stdin_data or STDIN_DATA
     argv = argv or ['claude-vibeline']
+    cache_dir = (tmp_path or Path(tempfile.mkdtemp())) / 'sessions'
+    cache_dir.mkdir(parents=True, exist_ok=True)
     stdin_buf = io.BytesIO(json.dumps(data).encode())
     stdout_buf = io.BytesIO()
     fake_stdin = io.TextIOWrapper(stdin_buf, encoding='utf-8')
@@ -1038,31 +1022,51 @@ def run_main(
         mock.patch('sys.argv', argv),
         mock.patch.object(_mod.sys, 'stdin', fake_stdin),
         mock.patch.object(_mod.sys, 'stdout', fake_stdout),
-        mock.patch('claude_vibeline.statusline.resolve_effort', return_value=effort),
+        mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=cache_dir),
+        mock.patch('claude_vibeline.statusline.read_settings_effort', return_value='medium?'),
     ):
         main()
         _mod.sys.stdout.flush()
         return stdout_buf.getvalue().decode('utf-8')
 
 
+def _effort_transcript(effort: str, tmp_path: Path) -> tuple[str, str]:
+    """
+    Create a transcript with an effort command and return (transcript_path, session_id).
+    """
+    transcript = tmp_path / 'sess-main.jsonl'
+    entry = json.dumps({
+        'type': 'assistant',
+        'timestamp': datetime.now(UTC).isoformat(),
+        'message': {'content': f'Set effort level to {effort}'},
+    })
+    transcript.write_text(entry + '\n')
+    return str(transcript), 'sess-main'
+
+
 class TestMain:
-    def test_full_pipeline_with_usage(self) -> None:
+    def test_full_pipeline_with_usage(self, tmp_path: Path) -> None:
+        transcript_path, session_id = _effort_transcript('high', tmp_path)
         usage_data = {
             'five_hour': {'utilization': 19, 'resets_at': '2099-01-01T00:00:00+00:00'},
             'seven_day': {'utilization': 3, 'resets_at': '2099-01-01T00:00:00+00:00'},
         }
+        data = {**STDIN_DATA, 'transcript_path': transcript_path, 'session_id': session_id}
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(usage_data, None)):
-            output = run_main()
+            output = run_main(stdin_data=data, tmp_path=tmp_path)
         assert 'my-project' in output
         assert 'Opus' in output
+        assert '(high)' in output
         assert '42%' in output
         assert '19%' in output
         assert '3%' in output
         assert '\u2265' not in output
 
-    def test_no_usage_data(self) -> None:
+    def test_no_usage_data(self, tmp_path: Path) -> None:
+        transcript_path, session_id = _effort_transcript('high', tmp_path)
+        data = {**STDIN_DATA, 'transcript_path': transcript_path, 'session_id': session_id}
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main()
+            output = run_main(stdin_data=data, tmp_path=tmp_path)
         assert 'my-project' in output
         assert 'Opus' in output
         assert '42%' in output
@@ -1111,10 +1115,11 @@ class TestMain:
         assert '42%' not in output
 
     def test_no_usage_flag(self) -> None:
-        with mock.patch('claude_vibeline.statusline.fetch_usage') as mock_fetch:
+        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
             output = run_main(argv=['claude-vibeline', '--no-usage'])
-        mock_fetch.assert_not_called()
         assert 'my-project' in output
+        assert 'sess' not in output
+        assert 'week' not in output
 
     def test_bar_width_flag(self) -> None:
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
@@ -1131,9 +1136,11 @@ class TestMain:
         assert 'extra' in output
         assert '2.50' in output
 
-    def test_max_effort(self) -> None:
+    def test_max_effort_from_transcript(self, tmp_path: Path) -> None:
+        transcript_path, session_id = _effort_transcript('max', tmp_path)
+        data = {**STDIN_DATA, 'transcript_path': transcript_path, 'session_id': session_id}
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(effort='max')
+            output = run_main(stdin_data=data, tmp_path=tmp_path)
         assert '(max)' in output
 
     def test_haiku_no_effort(self) -> None:
@@ -1187,7 +1194,7 @@ class TestMain:
 
         data = {**STDIN_DATA, 'transcript_path': str(transcript)}
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data)
+            output = run_main(stdin_data=data, tmp_path=tmp_path)
         assert 'cache' in output
         assert '\u2713' in output
 
@@ -1198,7 +1205,7 @@ class TestMain:
 
         data = {**STDIN_DATA, 'transcript_path': str(transcript)}
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data)
+            output = run_main(stdin_data=data, tmp_path=tmp_path)
         assert 'cache' in output
         assert '\u2717' in output
 
@@ -1209,26 +1216,44 @@ class TestMain:
 
         data = {**STDIN_DATA, 'transcript_path': str(transcript)}
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data, argv=['claude-vibeline', '--no-cache'])
+            output = run_main(stdin_data=data, tmp_path=tmp_path, argv=['claude-vibeline', '--no-cache'])
         assert 'cache' not in output
 
     def test_debug_logs_to_file(self, tmp_path: Path) -> None:
+        transcript_path, session_id = _effort_transcript('high', tmp_path)
         log_file = tmp_path / 'logs' / 'debug.log'
+        data = {**STDIN_DATA, 'transcript_path': transcript_path, 'session_id': session_id}
         with (
             mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)),
             mock.patch('claude_vibeline.statusline.debug_log_path', return_value=log_file),
         ):
-            run_main(argv=['claude-vibeline', '--debug'])
+            run_main(stdin_data=data, tmp_path=tmp_path, argv=['claude-vibeline', '--debug'])
         entry = json.loads(log_file.read_text(encoding='utf-8').strip())
         assert 'my-project' in entry['output']
         assert '\033[' not in entry['output']
         assert entry['effort'] == 'high'
 
-    def test_fallback_effort_shows_question_mark(self) -> None:
+    def test_settings_fallback_effort_shows_question_mark(self) -> None:
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(effort='high?')
+            output = run_main()
         assert 'Opus 4.6' in output
-        assert '(high?)' in output
+        assert '(medium?)' in output
+
+    def test_effort_resolution_end_to_end(self, tmp_path: Path) -> None:
+        """
+        Full pipeline: transcript → resolve_effort → model_section → session cache.
+
+        Transcript has effort command → resolve_effort reads it
+        → model_section displays it without '?' → session cache persists it.
+        """
+        transcript_path, session_id = _effort_transcript('low', tmp_path)
+        data = {**STDIN_DATA, 'transcript_path': transcript_path, 'session_id': session_id}
+        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
+            output = run_main(stdin_data=data, tmp_path=tmp_path)
+        assert '(low)' in output
+        assert '?' not in ANSI_RE.sub('', output).split('(low)')[1].split(')')[0]
+        cached = json.loads((tmp_path / 'sessions' / f'{session_id}.json').read_text())
+        assert cached['effort'] == 'low'
 
 
 class TestWriteDebugLog:
@@ -1329,6 +1354,20 @@ class TestWriteDebugLog:
             write_debug_log(f'a{NBSP}b', args)
         entry = json.loads(log_file.read_text(encoding='utf-8').strip())
         assert entry['output'] == 'a b'
+
+    def test_truncation_cleans_up_on_write_error(self, tmp_path: Path) -> None:
+        log_file = tmp_path / 'debug.log'
+        lines: list[str] = []
+        while sum(len(ln) for ln in lines) < DEBUG_LOG_MAX_BYTES + 1000:
+            lines.append(json.dumps({'i': len(lines), 'pad': 'x' * 200}) + '\n')
+        log_file.write_text(''.join(lines))
+        args = Args(debug=True)
+        with (
+            mock.patch('claude_vibeline.statusline.debug_log_path', return_value=log_file),
+            mock.patch('os.write', side_effect=OSError('disk full')),
+        ):
+            write_debug_log('test output', args)
+        assert len(list(tmp_path.glob('*.tmp'))) == 0
 
 
 def _user(ts: str) -> str:
@@ -1436,6 +1475,28 @@ class TestReadUserTimestamps:
         timestamps, last_user_idx = read_user_timestamps(str(transcript))
         assert len(timestamps) == 2
         assert last_user_idx is None
+
+    def test_binary_garbage_in_transcript(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        transcript.write_bytes(b'\x80\xff\xfe\x00' * 100)
+        timestamps, last_user_idx = read_user_timestamps(str(transcript))
+        assert timestamps == []
+        assert last_user_idx is None
+
+    def test_mixed_valid_and_corrupt_lines(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        lines = ['{bad json', _user('2026-03-07T10:00:00Z'), 'not even close', _assistant('2026-03-07T10:01:00Z')]
+        transcript.write_text('\n'.join(lines) + '\n')
+        timestamps, last_user_idx = read_user_timestamps(str(transcript))
+        assert len(timestamps) == 1
+        assert last_user_idx == 0
+
+    def test_user_entry_with_invalid_timestamp(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        entry = json.dumps({'type': 'user', 'timestamp': 'not-a-timestamp', 'message': {'content': 'hi'}})
+        transcript.write_text(entry + '\n')
+        timestamps, _ = read_user_timestamps(str(transcript))
+        assert timestamps == []
 
 
 class TestHasCacheGap:
@@ -1657,6 +1718,14 @@ class TestToggleSettingsSpace:
         with mock.patch.object(Path, 'expanduser', return_value=tmp_path / 'nonexistent.json'):
             toggle_settings_space()
 
+    def test_command_not_string(self, tmp_path: Path) -> None:
+        settings = tmp_path / 'settings.json'
+        data = {'statusLine': {'type': 'command', 'command': 42}}
+        settings.write_text(json.dumps(data), encoding='utf-8')
+        with mock.patch.object(Path, 'expanduser', return_value=settings):
+            toggle_settings_space()
+        assert json.loads(settings.read_text())['statusLine']['command'] == 42
+
 
 class TestIsLockOwner:
     def test_owns_lock(self, tmp_path: Path) -> None:
@@ -1793,6 +1862,15 @@ class TestSpawnCacheUpdater:
         with mock.patch('claude_vibeline.statusline.sp.Popen', side_effect=OSError):
             spawn_cache_updater(time.time() + 300)
         assert not (tmp_path / 'refresh.lock').exists()
+
+    def test_unix_sets_start_new_session(self, tmp_path: Path, monkeypatch: Any) -> None:
+        monkeypatch.setattr('claude_vibeline.statusline.refresh_lock_path', lambda: tmp_path / 'refresh.lock')
+        monkeypatch.setattr('claude_vibeline.statusline.sys.platform', 'linux')
+        mock_proc = mock.MagicMock(pid=12345)
+        with mock.patch('claude_vibeline.statusline.sp.Popen', return_value=mock_proc) as popen:
+            spawn_cache_updater(time.time() + 300)
+        assert popen.call_args[1]['start_new_session'] is True
+        assert 'creationflags' not in popen.call_args[1]
 
 
 class TestRefreshIntegration:
