@@ -8,6 +8,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-03-17
+
 ### Changed
 
 - Change prompt cache display from time-based (`● 21:35`) to countdown (`✓ 4m`) with low-threshold warning (`⚠ 47s`) and expired (`✗`) states
@@ -30,7 +32,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Fix usage showing stale percentage with `0m` countdown when `resets_at` is in the past
 - Fix debug log truncation corrupting JSONL structure by cutting at arbitrary byte offsets
 
-
 ## [1.0.0] - 2026-03-12
 
 ### Added
@@ -51,5 +52,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Add `--currency` option for extra usage currency symbol (default: `€`)
 - Add `--debug` flag to log each statusline output to a platform-specific log file
 
-[Unreleased]: https://github.com/hstojanovic/claude-vibeline/compare/1.0.0...HEAD
+[Unreleased]: https://github.com/hstojanovic/claude-vibeline/compare/1.1.0...HEAD
+[1.1.0]: https://github.com/hstojanovic/claude-vibeline/compare/1.0.0...1.1.0
 [1.0.0]: https://github.com/hstojanovic/claude-vibeline/releases/tag/1.0.0

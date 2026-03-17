@@ -30,7 +30,7 @@ def main() -> None:
     license_text = (ROOT / 'LICENSE').read_text(encoding='utf-8')
 
     # Unreleased section must be empty
-    unreleased_match = re.search(r'## \[Unreleased\]\s*\n(.*?)(?=\n## \[)', changelog, re.DOTALL)
+    unreleased_match = re.search(r'## \[Unreleased\]\n(.*?)(?=\n## \[)', changelog, re.DOTALL)
     if unreleased_match and unreleased_match.group(1).strip():
         errors.append(f'Unreleased section is not empty:\n{unreleased_match.group(1).strip()}')
 
