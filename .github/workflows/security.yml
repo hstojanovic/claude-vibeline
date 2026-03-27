@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
 
+# Remove entries once fixed versions are available
+env:
+  # CVE-2026-4539: pygments 2.19.2 — low-severity ReDoS in AdlLexer (CVSS 3.3), local-only, disputed by maintainers
+  IGNORE_VULNS: >-
+    --ignore-vuln CVE-2026-4539
+
 jobs:
   analyze:
     runs-on: ubuntu-latest
@@ -20,8 +26,10 @@ jobs:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v7
       - run: uv tool install pip-audit
-      - run: uv export --all-groups --all-extras --no-hashes --no-emit-project | pip-audit -r /dev/stdin
-      - run: uv run --no-project python -c "import tomllib; [print(r) for r in tomllib.load(open('pyproject.toml','rb'))['build-system']['requires']]" | pip-audit -r /dev/stdin
+      - name: Audit dependencies
+        run: uv export --all-groups --all-extras --no-hashes --no-emit-project | pip-audit $IGNORE_VULNS -r /dev/stdin
+      - name: Audit build dependencies
+        run: uv run --no-project python -c "import tomllib; [print(r) for r in tomllib.load(open('pyproject.toml','rb'))['build-system']['requires']]" | pip-audit $IGNORE_VULNS -r /dev/stdin
       - uses: github/codeql-action/init@v4
         with:
           languages: python

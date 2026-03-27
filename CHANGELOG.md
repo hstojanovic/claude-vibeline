@@ -8,6 +8,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- Ignore frivolous CVE-2026-4539 (pygments ReDoS) in security workflow to unblock CI
+
 ## [1.1.0] - 2026-03-17
 
 ### Changed
