@@ -37,7 +37,7 @@ dev = [
     "responses==0.26.0",
     "ruff==0.15.7",
     "ty==0.0.26",
-    "types-requests>=2.32.4,<2.32.6",
+    "types-requests==2.33.0.*",
 ]
 
 [project.scripts]
