@@ -13,6 +13,11 @@ updates:
       day: saturday
       time: "06:00"
     groups:
+      astral:
+        patterns:
+          - "ruff"
+          - "ty"
+          - "uv-build"
       requests:
         patterns:
           - "requests"
