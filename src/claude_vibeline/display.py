@@ -1,0 +1,199 @@
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
+
+from claude_vibeline.constants import (
+    ANSI_RE,
+    BAR_EMPTY,
+    CACHE_LOW_THRESHOLD,
+    DIM,
+    EMPTY,
+    FILL,
+    GOLD,
+    GREEN,
+    LABEL,
+    ORANGE,
+    PERC,
+    RED,
+    RESET,
+    SEP,
+    YELLOW,
+)
+
+if TYPE_CHECKING:
+    from claude_vibeline.args import Args
+    from claude_vibeline.schema import ExtraUsage, UsageBucket, UsageData
+
+
+def bar(perc: int, width: int) -> str:
+    width = max(0, width)
+    if not width:
+        return ''
+    perc = max(0, min(100, perc))
+    filled = round(perc * width / 100)
+    empty = width - filled
+    return f'{ORANGE}{FILL * filled}{BAR_EMPTY}{EMPTY * empty}{RESET}'
+
+
+def format_countdown(resets_at_iso: str) -> str:
+    try:
+        resets_at = datetime.fromisoformat(resets_at_iso)
+    except ValueError:
+        return ''
+    now = datetime.now(UTC)
+    secs_left = max(0, int((resets_at - now).total_seconds()))
+    d = secs_left // 86400
+    h = (secs_left % 86400) // 3600
+    m = (secs_left % 3600) // 60
+    parts: list[str] = []
+    if d:
+        parts.append(f'{d}d')
+    if d or h:
+        parts.append(f'{h}h')
+    if not d:
+        parts.append(f'{m}m')
+    return f'{DIM}{"".join(parts)}{RESET}'
+
+
+def is_past(resets_at_iso: str) -> bool:
+    try:
+        return datetime.now(UTC) >= datetime.fromisoformat(resets_at_iso)
+    except ValueError:
+        return False
+
+
+def usage_section(label: str, usage: UsageBucket, bar_width: int, *, stale_ts: float | None = None) -> str | None:
+    perc = usage.get('utilization')
+    resets_at = usage.get('resets_at')
+    if perc is None:
+        return None
+    if resets_at is not None and is_past(resets_at):
+        return f'{LABEL}{label}{RESET} {DIM}?{RESET}'
+    is_stale = stale_ts is not None
+    perc_int = round(perc)
+    approx = f'{DIM}\u2265{RESET}' if is_stale else ''
+    countdown = format_countdown(resets_at) if resets_at is not None else ''
+    return f'{LABEL}{label}{RESET} {bar(perc_int, bar_width)} {approx}{PERC}{perc_int}%{RESET} {countdown}'
+
+
+def extra_section(extra: ExtraUsage, currency: str, *, stale_ts: float | None = None) -> str | None:
+    if not extra.get('is_enabled'):
+        return None
+    used_cents = extra.get('used_credits')
+    if used_cents is None:
+        return None
+    is_stale = stale_ts is not None
+    if stale_ts is not None:
+        cached = datetime.fromtimestamp(stale_ts, UTC)
+        now = datetime.now(UTC)
+        if (cached.year, cached.month) != (now.year, now.month):
+            return f'{LABEL}extra{RESET} {DIM}?{RESET}'
+    used = used_cents / 100
+    limit_cents = extra.get('monthly_limit')
+    now = datetime.now(UTC)
+    next_month = (now.replace(day=1) + timedelta(days=32)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    countdown = format_countdown(next_month.isoformat())
+    lbl = f'{LABEL}extra{RESET}'
+    approx = f'{DIM}\u2265{RESET}' if is_stale else ''
+    if limit_cents is not None:
+        limit = limit_cents // 100
+        return f'{lbl} {approx}{PERC}{used:.2f}{RESET}{DIM}/{RESET}{PERC}{limit}{currency}{RESET} {countdown}'
+    return f'{lbl} {approx}{PERC}{used:.2f}{currency}{RESET} {countdown}'
+
+
+def usage_parts(args: Args, usage: UsageData | None = None, stale_ts: float | None = None) -> list[str]:
+    if usage is None:
+        return []
+
+    parts: list[str] = []
+
+    buckets = [
+        (args.session, 'five_hour', 'sess'),
+        (args.weekly, 'seven_day', 'week'),
+        (args.opus, 'seven_day_opus', 'opus'),
+        (args.sonnet, 'seven_day_sonnet', 'sonnet'),
+    ]
+    for enabled, key, label in buckets:
+        if enabled:
+            bucket = usage.get(key)
+            if bucket is not None:
+                section = usage_section(label, bucket, args.bar_width, stale_ts=stale_ts)
+                if section is not None:
+                    parts.append(section)
+
+    if args.extra:
+        extra = usage.get('extra_usage')
+        if extra is not None:
+            section = extra_section(extra, args.currency, stale_ts=stale_ts)
+            if section is not None:
+                parts.append(section)
+
+    return parts
+
+
+SUPPORTED_EFFORTS: dict[str, set[str]] = {'opus': {'low', 'medium', 'high', 'max'}, 'sonnet': {'low', 'medium', 'high'}}
+
+
+def model_family(model_name: str) -> str:
+    return model_name.split(maxsplit=1)[0].lower() if model_name else ''
+
+
+def model_section(model_name: str, effort: str) -> str:
+    family = model_family(model_name)
+    supported = SUPPORTED_EFFORTS.get(family)
+    if supported is None:
+        return f'{ORANGE}{model_name}{RESET}'
+    if effort.rstrip('?') in supported:
+        return f'{ORANGE}{model_name}{RESET} {GOLD}({effort}){RESET}'
+    return f'{ORANGE}{model_name}{RESET} {GOLD}(medium?){RESET}'
+
+
+def format_context_size(tokens: int) -> str:
+    """
+    Format token count as human-readable size (e.g. 200_000 -> "200k", 1_000_000 -> "1M").
+    """
+    if tokens >= 1_000_000:
+        return f'{tokens / 1_000_000:g}M'
+    return f'{tokens / 1_000:g}k'
+
+
+def format_cache_countdown(secs_left: int) -> str:
+    """
+    Format seconds as a compact countdown: "4m" when >= 60s, "47s" when < 60s.
+    """
+    if secs_left >= 60:
+        return f'{secs_left // 60}m'
+    return f'{secs_left}s'
+
+
+def cache_section(secs_left: int, *, gap: bool) -> str:
+    gap_icon = f'{RED}!{RESET} ' if gap else ''
+    if secs_left == 0:
+        return f'{LABEL}cache{RESET} {gap_icon}{RED}\u2717{RESET}'
+    countdown = format_cache_countdown(secs_left)
+    if secs_left <= CACHE_LOW_THRESHOLD:
+        return f'{LABEL}cache{RESET} {gap_icon}{YELLOW}\u26a0 {countdown}{RESET}'
+    return f'{LABEL}cache{RESET} {gap_icon}{GREEN}\u2713 {countdown}{RESET}'
+
+
+def visible_len(s: str) -> int:
+    return len(ANSI_RE.sub('', s))
+
+
+def wrap_parts(parts: list[str], columns: int) -> str:
+    sep_len = visible_len(SEP)
+    lines: list[str] = []
+    line_parts: list[str] = []
+    line_len = 0
+    for part in parts:
+        part_len = visible_len(part)
+        width = (sep_len + part_len) if line_parts else part_len
+        if line_parts and line_len + width > columns:
+            lines.append(SEP.join(line_parts) + SEP)
+            line_parts = [part]
+            line_len = part_len
+        else:
+            line_parts.append(part)
+            line_len += width
+    if line_parts:
+        lines.append(SEP.join(line_parts))
+    return '\n'.join(lines)

@@ -1,0 +1,392 @@
+import time
+from typing import TYPE_CHECKING
+
+import pytest
+from freezegun import freeze_time
+
+from claude_vibeline.args import Args
+from claude_vibeline.constants import ANSI_RE, CACHE_LOW_THRESHOLD, EMPTY, FILL, NBSP, ORANGE, PERC, RESET, SEP
+from claude_vibeline.display import (
+    bar,
+    cache_section,
+    extra_section,
+    format_cache_countdown,
+    format_context_size,
+    format_countdown,
+    is_past,
+    model_section,
+    usage_parts,
+    usage_section,
+    visible_len,
+    wrap_parts,
+)
+
+if TYPE_CHECKING:
+    from claude_vibeline.schema import ExtraUsage, UsageBucket, UsageData
+
+
+class TestBar:
+    @pytest.mark.parametrize(
+        ('perc', 'width', 'filled', 'empty'),
+        [(0, 8, 0, 8), (50, 8, 4, 4), (100, 8, 8, 0), (25, 4, 1, 3), (1, 8, 0, 8), (99, 8, 8, 0)],
+    )
+    def test_fill_ratio(self, perc: int, width: int, filled: int, empty: int) -> None:
+        result = bar(perc, width)
+        assert result.count(FILL) == filled
+        assert result.count(EMPTY) == empty
+
+    def test_width_zero(self) -> None:
+        assert not bar(50, 0)
+
+    def test_negative_pct_clamped(self) -> None:
+        assert bar(-10, 8).count(EMPTY) == 8
+
+    def test_pct_over_100_clamped(self) -> None:
+        assert bar(200, 8).count(FILL) == 8
+
+    def test_negative_width_clamped(self) -> None:
+        assert not bar(50, -5)
+
+
+class TestBarRounding:
+    def test_1_percent_width_8_rounds_to_zero(self) -> None:
+        result = bar(1, 8)
+        assert result.count(FILL) == 0
+        assert result.count(EMPTY) == 8
+
+    def test_7_percent_width_8_rounds_to_one(self) -> None:
+        result = bar(7, 8)
+        assert result.count(FILL) == 1
+        assert result.count(EMPTY) == 7
+
+    def test_99_percent_width_8(self) -> None:
+        result = bar(99, 8)
+        assert result.count(FILL) == 8
+
+
+class TestFormatCacheCountdown:
+    @pytest.mark.parametrize(
+        ('secs', 'expected'),
+        [(300, '5m'), (240, '4m'), (61, '1m'), (60, '1m'), (59, '59s'), (47, '47s'), (1, '1s'), (0, '0s')],
+    )
+    def test_formatting(self, secs: int, expected: str) -> None:
+        assert format_cache_countdown(secs) == expected
+
+
+class TestCacheSection:
+    def test_warm(self) -> None:
+        result = cache_section(250, gap=False)
+        assert '\u2713' in result
+        assert 'cache' in result
+
+    def test_low(self) -> None:
+        result = cache_section(CACHE_LOW_THRESHOLD, gap=False)
+        assert '\u26a0' in result
+
+    def test_expired(self) -> None:
+        result = cache_section(0, gap=False)
+        assert '\u2717' in result
+
+    def test_gap_shown(self) -> None:
+        result = cache_section(250, gap=True)
+        assert '!' in result
+        assert '\u2713' in result
+
+    def test_gap_on_expired(self) -> None:
+        result = cache_section(0, gap=True)
+        assert '!' in result
+        assert '\u2717' in result
+
+
+class TestIsPast:
+    @freeze_time('2026-03-07T12:00:00Z')
+    def test_future(self) -> None:
+        assert not is_past('2026-03-07T15:00:00+00:00')
+
+    @freeze_time('2026-03-07T12:00:00Z')
+    def test_past(self) -> None:
+        assert is_past('2026-03-07T10:00:00+00:00')
+
+    def test_invalid(self) -> None:
+        assert not is_past('not-a-date')
+
+
+class TestUsageSection:
+    def test_valid_data(self) -> None:
+        usage: UsageBucket = {'utilization': 42, 'resets_at': '2099-01-01T00:00:00+00:00'}
+        result = usage_section('sess', usage, 8)
+        assert result is not None
+        assert 'sess' in result
+        assert '42%' in result
+        assert '\u2265' not in result
+
+    def test_none_pct(self) -> None:
+        usage: UsageBucket = {'utilization': None, 'resets_at': '2099-01-01T00:00:00+00:00'}
+        result = usage_section('sess', usage, 8)
+        assert result is None
+
+    def test_without_resets_at(self) -> None:
+        usage: UsageBucket = {'utilization': 25}
+        result = usage_section('week', usage, 8)
+        assert result is not None
+        assert '25%' in result
+
+    def test_stale_within_window(self) -> None:
+        usage: UsageBucket = {'utilization': 42, 'resets_at': '2099-01-01T00:00:00+00:00'}
+        result = usage_section('sess', usage, 8, stale_ts=time.time() - 120)
+        assert result is not None
+        assert '\u2265' in result
+        assert '42%' in result
+        assert '?' not in result
+
+    @freeze_time('2026-03-07T12:00:00Z')
+    def test_stale_past_reset(self) -> None:
+        usage: UsageBucket = {'utilization': 42, 'resets_at': '2026-03-07T10:00:00+00:00'}
+        result = usage_section('sess', usage, 8, stale_ts=time.time() - 120)
+        assert result is not None
+        assert '?' in result
+        assert '42%' not in result
+        assert FILL not in result
+
+    @freeze_time('2026-03-07T12:00:00Z')
+    def test_fresh_past_reset(self) -> None:
+        usage: UsageBucket = {'utilization': 42, 'resets_at': '2026-03-07T10:00:00+00:00'}
+        result = usage_section('sess', usage, 8)
+        assert result is not None
+        assert '?' in result
+        assert '42%' not in result
+        assert FILL not in result
+
+
+class TestExtraSection:
+    def test_enabled_with_limit(self) -> None:
+        extra: ExtraUsage = {'is_enabled': True, 'used_credits': 123, 'monthly_limit': 2000}
+        result = extra_section(extra, '$')
+        assert result is not None
+        assert 'extra' in result
+        assert '1.23' in result
+        assert '20$' in result
+
+    def test_enabled_without_limit(self) -> None:
+        extra: ExtraUsage = {'is_enabled': True, 'used_credits': 500}
+        result = extra_section(extra, '€')
+        assert result is not None
+        assert '5.00€' in result
+
+    def test_disabled(self) -> None:
+        extra: ExtraUsage = {'is_enabled': False, 'used_credits': 100, 'monthly_limit': 2000}
+        result = extra_section(extra, '$')
+        assert result is None
+
+    def test_missing_used_credits(self) -> None:
+        extra: ExtraUsage = {'is_enabled': True, 'monthly_limit': 2000}
+        result = extra_section(extra, '$')
+        assert result is None
+
+    @freeze_time('2026-02-15T12:00:00Z')
+    def test_countdown_to_next_month(self) -> None:
+        extra: ExtraUsage = {'is_enabled': True, 'used_credits': 100, 'monthly_limit': 2000}
+        result = extra_section(extra, '$')
+        assert result is not None
+        assert '13d' in result
+
+    @freeze_time('2026-03-15T12:00:00Z')
+    def test_stale_same_month(self) -> None:
+        extra: ExtraUsage = {'is_enabled': True, 'used_credits': 250, 'monthly_limit': 2000}
+        stale_ts = time.time() - 120
+        result = extra_section(extra, '$', stale_ts=stale_ts)
+        assert result is not None
+        assert '\u2265' in result
+        assert '2.50' in result
+        assert '?' not in result
+
+    @freeze_time('2026-03-01T00:30:00Z')
+    def test_stale_previous_month(self) -> None:
+        extra: ExtraUsage = {'is_enabled': True, 'used_credits': 250, 'monthly_limit': 2000}
+        stale_ts = time.time() - 3600
+        result = extra_section(extra, '$', stale_ts=stale_ts)
+        assert result is not None
+        assert '?' in result
+        assert '2.50' not in result
+
+
+class TestFormatCountdown:
+    @freeze_time('2026-02-24T10:00:00Z')
+    def test_future_days_and_hours(self) -> None:
+        result = format_countdown('2026-02-27T14:30:00+00:00')
+        assert '3d' in result
+        assert '4h' in result
+
+    @freeze_time('2026-02-24T10:00:00Z')
+    def test_hours_and_minutes(self) -> None:
+        result = format_countdown('2026-02-24T13:45:00+00:00')
+        assert '3h' in result
+        assert '45m' in result
+        assert 'd' not in result
+
+    @freeze_time('2026-02-24T10:00:00Z')
+    def test_past_timestamp_clamps_to_zero(self) -> None:
+        result = format_countdown('2026-02-20T00:00:00+00:00')
+        assert '0m' in result
+
+    def test_invalid_iso_string(self) -> None:
+        result = format_countdown('not-a-date')
+        assert not result
+
+
+class TestFormatContextSize:
+    def test_200k(self) -> None:
+        assert format_context_size(200_000) == '200k'
+
+    def test_1m(self) -> None:
+        assert format_context_size(1_000_000) == '1M'
+
+    def test_128k(self) -> None:
+        assert format_context_size(128_000) == '128k'
+
+    def test_1_5m(self) -> None:
+        assert format_context_size(1_500_000) == '1.5M'
+
+
+class TestVisibleLen:
+    def test_plain_text(self) -> None:
+        assert visible_len('hello') == 5
+
+    def test_ansi_stripped(self) -> None:
+        assert visible_len('\033[38;5;209mhello\033[0m') == 5
+
+    def test_empty(self) -> None:
+        assert visible_len('') == 0
+
+    def test_nbsp_counted(self) -> None:
+        assert visible_len(f'a{NBSP}b') == 3
+
+    def test_bar_visible_len(self) -> None:
+        result = bar(50, 8)
+        assert visible_len(result) == 8
+
+
+class TestWrapParts:
+    def test_single_line_no_wrap(self) -> None:
+        parts = ['aaa', 'bbb']
+        result = wrap_parts(parts, 120)
+        assert '\n' not in result
+        assert 'aaa' in result
+        assert 'bbb' in result
+
+    def test_wraps_when_exceeding_columns(self) -> None:
+        parts = ['a' * 40, 'b' * 40, 'c' * 40]
+        result = wrap_parts(parts, 80)
+        lines = result.split('\n')
+        assert len(lines) >= 2
+
+    def test_trailing_separator_on_wrapped_lines(self) -> None:
+        parts = ['a' * 40, 'b' * 40, 'c' * 10]
+        result = wrap_parts(parts, 50)
+        lines = result.split('\n')
+        assert len(lines) >= 2
+        sep_plain = ANSI_RE.sub('', SEP).strip()
+        for line in lines[:-1]:
+            plain = ANSI_RE.sub('', line).rstrip()
+            assert plain.endswith(sep_plain)
+        last_plain = ANSI_RE.sub('', lines[-1]).rstrip()
+        assert not last_plain.endswith(sep_plain)
+
+    def test_no_trailing_separator_single_line(self) -> None:
+        parts = ['aaa', 'bbb']
+        result = wrap_parts(parts, 120)
+        sep_plain = ANSI_RE.sub('', SEP).strip()
+        plain = ANSI_RE.sub('', result).rstrip()
+        assert not plain.endswith(sep_plain)
+
+    def test_empty_parts(self) -> None:
+        assert not wrap_parts([], 80)
+
+    def test_single_part(self) -> None:
+        result = wrap_parts(['hello world'], 80)
+        assert result == 'hello world'
+
+    def test_spaces_preserved(self) -> None:
+        result = wrap_parts(['a b c'], 80)
+        assert 'a b c' in result
+
+    def test_each_line_within_columns(self) -> None:
+        parts = ['a' * 20, 'b' * 20, 'c' * 20, 'd' * 20]
+        result = wrap_parts(parts, 50)
+        for line in result.split('\n'):
+            assert visible_len(line) <= 50 + visible_len(SEP)
+
+    def test_wide_part_not_split(self) -> None:
+        parts = ['a' * 100]
+        result = wrap_parts(parts, 50)
+        assert '\n' not in result
+
+
+class TestWrapPartsAnsi:
+    def test_ansi_parts_fit_on_one_line(self) -> None:
+        parts = [f'{ORANGE}hello{RESET}', f'{PERC}world{RESET}']
+        result = wrap_parts(parts, 40)
+        assert '\n' not in result
+
+    def test_ansi_parts_wrap_at_visible_width(self) -> None:
+        p1 = f'{ORANGE}{"a" * 10}{RESET}'
+        p2 = f'{PERC}{"b" * 10}{RESET}'
+        result = wrap_parts([p1, p2], 15)
+        assert '\n' in result
+
+
+class TestUsageParts:
+    def test_empty_usage_data(self) -> None:
+        args = Args()
+        assert usage_parts(args, {}) == []
+
+    def test_none_usage(self) -> None:
+        args = Args()
+        assert usage_parts(args, None) == []
+
+    def test_all_buckets_disabled(self) -> None:
+        args = Args(session=False, weekly=False, opus=False, sonnet=False, extra=False)
+        usage: UsageData = {
+            'five_hour': {'utilization': 50},
+            'seven_day': {'utilization': 50},
+            'extra_usage': {'is_enabled': True, 'used_credits': 100},
+        }
+        assert usage_parts(args, usage) == []
+
+
+class TestModelSection:
+    def test_standard_model(self) -> None:
+        result = model_section('Opus 4.6', 'high')
+        assert 'Opus 4.6' in result
+        assert '(high)' in result
+
+    def test_low_effort(self) -> None:
+        result = model_section('Sonnet 4.6', 'low')
+        assert '(low)' in result
+
+    def test_medium_effort(self) -> None:
+        result = model_section('Opus 4.6', 'medium')
+        assert '(medium)' in result
+
+    def test_max_effort(self) -> None:
+        result = model_section('Opus 4.6', 'max')
+        assert '(max)' in result
+
+    def test_haiku_skips_effort(self) -> None:
+        result = model_section('Haiku 4.5', 'high')
+        assert 'Haiku' in result
+        assert '(' not in result
+
+    def test_fallback_effort_shows_question_mark(self) -> None:
+        result = model_section('Opus 4.6', 'high?')
+        assert 'Opus 4.6' in result
+        assert '(high?)' in result
+
+    def test_unsupported_fallback_effort_defaults_to_medium(self) -> None:
+        result = model_section('Sonnet 4.6', 'max?')
+        assert '(medium?)' in result
+
+    def test_unknown_model_skips_effort(self) -> None:
+        result = model_section('CustomModel 1.0', 'high')
+        assert 'CustomModel' in result
+        assert '(' not in result
