@@ -30,6 +30,16 @@ class OAuthCredentials(TypedDict, total=False):
     claudeAiOauth: OAuthEntry
 
 
+class StdinRateLimitBucket(TypedDict, total=False):
+    used_percentage: float
+    resets_at: int
+
+
+class StdinRateLimits(TypedDict, total=False):
+    five_hour: StdinRateLimitBucket
+    seven_day: StdinRateLimitBucket
+
+
 class Workspace(TypedDict, total=False):
     project_dir: str
     current_dir: str
@@ -50,6 +60,7 @@ class StdinData(TypedDict, total=False):
     context_window: ContextWindow
     transcript_path: str
     session_id: str
+    rate_limits: StdinRateLimits
 
 
 class SessionCache(TypedDict, total=False):

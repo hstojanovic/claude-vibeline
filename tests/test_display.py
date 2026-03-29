@@ -7,6 +7,7 @@ from freezegun import freeze_time
 from claude_vibeline.args import Args
 from claude_vibeline.constants import ANSI_RE, CACHE_LOW_THRESHOLD, EMPTY, FILL, NBSP, ORANGE, PERC, RESET, SEP
 from claude_vibeline.display import (
+    api_usage_parts,
     bar,
     cache_section,
     extra_section,
@@ -15,14 +16,15 @@ from claude_vibeline.display import (
     format_countdown,
     is_past,
     model_section,
-    usage_parts,
+    stdin_section,
+    stdin_usage_parts,
     usage_section,
     visible_len,
     wrap_parts,
 )
 
 if TYPE_CHECKING:
-    from claude_vibeline.schema import ExtraUsage, UsageBucket, UsageData
+    from claude_vibeline.schema import ExtraUsage, StdinRateLimits, UsageBucket, UsageData
 
 
 class TestBar:
@@ -335,23 +337,90 @@ class TestWrapPartsAnsi:
         assert '\n' in result
 
 
-class TestUsageParts:
+class TestStdinSection:
+    def test_renders_percentage_and_countdown(self) -> None:
+        result = stdin_section('sess', {'used_percentage': 17.5, 'resets_at': 4070908800}, 8)
+        assert result is not None
+        assert '18%' in result
+        assert 'sess' in result
+
+    def test_without_resets_at(self) -> None:
+        result = stdin_section('sess', {'used_percentage': 5.0}, 8)
+        assert result is not None
+        assert '5%' in result
+
+    def test_past_resets_at_shows_question_mark(self) -> None:
+        result = stdin_section('sess', {'used_percentage': 10.0, 'resets_at': 0}, 8)
+        assert result is not None
+        assert '?' in result
+        assert '10%' not in result
+
+    def test_short_countdown_shows_minutes(self) -> None:
+        soon = int(time.time()) + 3600
+        result = stdin_section('sess', {'used_percentage': 10.0, 'resets_at': soon}, 8)
+        assert result is not None
+        assert 'm' in result
+
+    def test_missing_percentage(self) -> None:
+        result = stdin_section('sess', {}, 8)
+        assert result is None
+
+
+class TestStdinUsageParts:
+    def test_session_from_stdin(self) -> None:
+        args = Args()
+        limits: StdinRateLimits = {'five_hour': {'used_percentage': 17, 'resets_at': 4070908800}}
+        result = stdin_usage_parts(args, limits)
+        assert len(result) == 1
+        assert 'sess' in result[0]
+        assert '17%' in result[0]
+
+    def test_weekly_from_stdin(self) -> None:
+        args = Args()
+        limits: StdinRateLimits = {'seven_day': {'used_percentage': 7, 'resets_at': 4070908800}}
+        result = stdin_usage_parts(args, limits)
+        assert len(result) == 1
+        assert 'week' in result[0]
+
+    def test_both_from_stdin(self) -> None:
+        args = Args()
+        limits: StdinRateLimits = {
+            'five_hour': {'used_percentage': 15, 'resets_at': 4070908800},
+            'seven_day': {'used_percentage': 7, 'resets_at': 4070908800},
+        }
+        result = stdin_usage_parts(args, limits)
+        assert len(result) == 2
+
+    def test_disabled_session(self) -> None:
+        args = Args(session=False)
+        limits: StdinRateLimits = {'five_hour': {'used_percentage': 15, 'resets_at': 4070908800}}
+        assert stdin_usage_parts(args, limits) == []
+
+    def test_empty_limits(self) -> None:
+        args = Args()
+        limits: StdinRateLimits = {}
+        assert stdin_usage_parts(args, limits) == []
+
+
+class TestApiUsageParts:
     def test_empty_usage_data(self) -> None:
         args = Args()
-        assert usage_parts(args, {}) == []
-
-    def test_none_usage(self) -> None:
-        args = Args()
-        assert usage_parts(args, None) == []
+        assert api_usage_parts(args, {}) == []
 
     def test_all_buckets_disabled(self) -> None:
-        args = Args(session=False, weekly=False, opus=False, sonnet=False, extra=False)
+        args = Args(opus=False, sonnet=False, extra=False)
         usage: UsageData = {
-            'five_hour': {'utilization': 50},
-            'seven_day': {'utilization': 50},
+            'seven_day_opus': {'utilization': 50},
             'extra_usage': {'is_enabled': True, 'used_credits': 100},
         }
-        assert usage_parts(args, usage) == []
+        assert api_usage_parts(args, usage) == []
+
+    def test_opus_bucket(self) -> None:
+        args = Args(opus=True)
+        usage: UsageData = {'seven_day_opus': {'utilization': 30}}
+        result = api_usage_parts(args, usage)
+        assert len(result) == 1
+        assert 'opus' in result[0]
 
 
 class TestModelSection:

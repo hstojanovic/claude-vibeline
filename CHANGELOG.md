@@ -8,6 +8,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- Change session and weekly usage to read from stdin `rate_limits` instead of OAuth API, skipping the API call when only session/weekly sections are enabled
+
 ### Fixed
 
 - Fix effort level showing on legacy models (Opus 4.5, Sonnet 4.5, etc.) that don't support adaptive thinking

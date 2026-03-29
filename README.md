@@ -27,10 +27,10 @@ From Claude Code's session data:
 - **Project & model** - project name, active model, and effort level (resolved from session transcript with `settings.json` fallback)
 - **Context window** - how much of the context window is used, with size indicator (e.g. `200k`, `1M`)
 - **Prompt cache** - live countdown of the 5-minute prompt cache TTL (see [Prompt cache](#prompt-cache))
-
-From Anthropic's OAuth API (subscription rate limits, not per-token costs):
 - **Session limit** - 5-hour rate limit utilization with reset countdown
 - **Weekly limit** - 7-day rate limit utilization with reset countdown
+
+From Anthropic's OAuth API (subscription rate limits, not per-token costs):
 - **Per-model limits** - weekly Opus and Sonnet limits with reset countdowns, shown when applicable
 - **Extra usage** - spend against your monthly extra usage cap with reset countdown, shown only if enabled
 
@@ -105,9 +105,11 @@ week [-----] 3% 5d20h │ extra 1.23/20$ 7d0h
 
 ## Usage data
 
-Usage data is fetched from an Anthropic OAuth endpoint (see [Limitations](#limitations)). It requires a valid OAuth token from a Claude Pro, Max, or Team subscription.
+Session and weekly limits are read directly from Claude Code's stdin data — no API call needed.
 
-Responses are cached locally for 60 seconds. Cached usage data is used when the token expires or the API is unavailable. If no token or cache exists, usage sections are omitted. Use `--no-usage` to disable API calls entirely.
+Per-model and extra usage data is fetched from an Anthropic OAuth endpoint (see [Limitations](#limitations)). It requires a valid OAuth token from a Claude Pro, Max, or Team subscription. Responses are cached locally for 60 seconds. Cached usage data is used when the token expires or the API is unavailable. If no token or cache exists, these sections are omitted. The API is only called when per-model or extra usage sections are enabled.
+
+Use `--no-usage` to disable all usage sections.
 
 ## Prompt cache
 

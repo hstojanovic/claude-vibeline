@@ -9,7 +9,14 @@ import cappa
 from claude_vibeline.args import Args
 from claude_vibeline.constants import CREAM, DIM, LABEL, PERC, RESET
 from claude_vibeline.debug import write_debug_log
-from claude_vibeline.display import bar, format_context_size, model_section, usage_parts, wrap_parts
+from claude_vibeline.display import (
+    api_usage_parts,
+    bar,
+    format_context_size,
+    model_section,
+    stdin_usage_parts,
+    wrap_parts,
+)
 from claude_vibeline.effort import resolve_effort
 from claude_vibeline.prompt_cache import prompt_cache_section
 from claude_vibeline.refresh import maybe_spawn_cache_updater
@@ -17,6 +24,20 @@ from claude_vibeline.usage import fetch_usage
 
 if TYPE_CHECKING:
     from claude_vibeline.schema import StdinData, UsageData
+
+
+def collect_usage(args: Args, data: StdinData) -> tuple[list[str], UsageData | None, float | None]:
+    parts: list[str] = []
+    stdin_limits = data.get('rate_limits')
+    if args.usage and stdin_limits is not None:
+        parts.extend(stdin_usage_parts(args, stdin_limits))
+    api_usage: UsageData | None = None
+    stale_ts: float | None = None
+    if args.usage and (args.opus or args.sonnet or args.extra):
+        api_usage, stale_ts = fetch_usage()
+        if api_usage is not None:
+            parts.extend(api_usage_parts(args, api_usage, stale_ts))
+    return parts, api_usage, stale_ts
 
 
 def main() -> None:
@@ -54,11 +75,8 @@ def main() -> None:
         ctx_size = f' {DIM}{format_context_size(ctx_window)}{RESET}' if isinstance(ctx_window, int) else ''
         parts.append(f'{LABEL}ctx{RESET}{ctx_size} {bar(used_perc, args.bar_width)} {PERC}{used_perc}%{RESET}')
 
-    usage: UsageData | None = None
-    stale_ts: float | None = None
-    if args.usage:
-        usage, stale_ts = fetch_usage()
-        parts.extend(usage_parts(args, usage, stale_ts))
+    usage_result, api_usage, stale_ts = collect_usage(args, data)
+    parts.extend(usage_result)
 
     output = wrap_parts(parts, args.columns)
     print(output)
@@ -67,4 +85,4 @@ def main() -> None:
         maybe_spawn_cache_updater(last_user_ts)
 
     if args.debug:
-        write_debug_log(output, args, stdin_data=data, usage_data=usage, stale_ts=stale_ts, effort=effort)
+        write_debug_log(output, args, stdin_data=data, usage_data=api_usage, stale_ts=stale_ts, effort=effort)

@@ -80,12 +80,16 @@ def _effort_transcript(effort: str, tmp_path: Path) -> tuple[str, str]:
 class TestMain:
     def test_full_pipeline_with_usage(self, tmp_path: Path) -> None:
         transcript_path, session_id = _effort_transcript('high', tmp_path)
-        usage_data = {
-            'five_hour': {'utilization': 19, 'resets_at': '2099-01-01T00:00:00+00:00'},
-            'seven_day': {'utilization': 3, 'resets_at': '2099-01-01T00:00:00+00:00'},
+        data = {
+            **STDIN_DATA,
+            'transcript_path': transcript_path,
+            'session_id': session_id,
+            'rate_limits': {
+                'five_hour': {'used_percentage': 19, 'resets_at': 4070908800},
+                'seven_day': {'used_percentage': 3, 'resets_at': 4070908800},
+            },
         }
-        data = {**STDIN_DATA, 'transcript_path': transcript_path, 'session_id': session_id}
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(usage_data, None)):
+        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
             output = run_main(stdin_data=data, tmp_path=tmp_path)
         assert 'my-project' in output
         assert 'Opus' in output
@@ -148,8 +152,14 @@ class TestMain:
         assert '42%' not in output
 
     def test_no_usage_flag(self) -> None:
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(argv=['claude-vibeline', '--no-usage'])
+        data = {
+            **STDIN_DATA,
+            'rate_limits': {
+                'five_hour': {'used_percentage': 10, 'resets_at': 4070908800},
+                'seven_day': {'used_percentage': 5, 'resets_at': 4070908800},
+            },
+        }
+        output = run_main(stdin_data=data, argv=['claude-vibeline', '--no-usage'])
         assert 'my-project' in output
         assert 'sess' not in output
         assert 'week' not in output
@@ -160,10 +170,7 @@ class TestMain:
         assert output.count(FILL) + output.count(EMPTY) == 4
 
     def test_extra_usage_shown(self) -> None:
-        usage_data = {
-            'five_hour': {'utilization': 10, 'resets_at': '2099-01-01T00:00:00+00:00'},
-            'extra_usage': {'is_enabled': True, 'used_credits': 250, 'monthly_limit': 2000},
-        }
+        usage_data: UsageData = {'extra_usage': {'is_enabled': True, 'used_credits': 250, 'monthly_limit': 2000}}
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(usage_data, None)):
             output = run_main()
         assert 'extra' in output
@@ -184,7 +191,7 @@ class TestMain:
         assert '(' not in output
 
     def test_stale_within_window(self) -> None:
-        usage_data = {'five_hour': {'utilization': 19, 'resets_at': '2099-01-01T00:00:00+00:00'}}
+        usage_data: UsageData = {'seven_day_opus': {'utilization': 19, 'resets_at': '2099-01-01T00:00:00+00:00'}}
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(usage_data, time.time() - 120)):
             output = run_main()
         assert '\u2265' in output
@@ -193,7 +200,7 @@ class TestMain:
 
     @freeze_time('2026-03-07T12:00:00Z')
     def test_stale_past_reset(self) -> None:
-        usage_data = {'five_hour': {'utilization': 19, 'resets_at': '2026-03-07T10:00:00+00:00'}}
+        usage_data: UsageData = {'seven_day_opus': {'utilization': 19, 'resets_at': '2026-03-07T10:00:00+00:00'}}
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(usage_data, time.time() - 120)):
             output = run_main()
         assert '?' in output
@@ -316,44 +323,46 @@ class TestProjectNameEdgeCases:
 
 
 class TestIndividualBucketFlags:
-    FULL_USAGE: ClassVar[UsageData] = {
-        'five_hour': {'utilization': 10, 'resets_at': '2099-01-01T00:00:00+00:00'},
-        'seven_day': {'utilization': 20, 'resets_at': '2099-01-01T00:00:00+00:00'},
+    STDIN_LIMITS: ClassVar[dict[str, Any]] = {
+        'five_hour': {'used_percentage': 10, 'resets_at': 4070908800},
+        'seven_day': {'used_percentage': 20, 'resets_at': 4070908800},
+    }
+    API_USAGE: ClassVar[UsageData] = {
         'seven_day_opus': {'utilization': 30, 'resets_at': '2099-01-01T00:00:00+00:00'},
         'seven_day_sonnet': {'utilization': 40, 'resets_at': '2099-01-01T00:00:00+00:00'},
         'extra_usage': {'is_enabled': True, 'used_credits': 500, 'monthly_limit': 2000},
     }
 
+    def _run(self, *extra_argv: str) -> str:
+        data = {**STDIN_DATA, 'rate_limits': self.STDIN_LIMITS}
+        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(self.API_USAGE, None)):
+            return run_main(stdin_data=data, argv=['claude-vibeline', *extra_argv])
+
     def test_no_session_hides_only_session(self) -> None:
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(self.FULL_USAGE, None)):
-            output = run_main(argv=['claude-vibeline', '--no-session'])
+        output = self._run('--no-session')
         assert 'sess' not in output
         assert 'week' in output
         assert 'opus' in output
 
     def test_no_weekly_hides_only_weekly(self) -> None:
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(self.FULL_USAGE, None)):
-            output = run_main(argv=['claude-vibeline', '--no-weekly'])
+        output = self._run('--no-weekly')
         assert 'sess' in output
         assert '20%' not in output
         assert 'opus' in output
 
     def test_no_opus_hides_only_opus(self) -> None:
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(self.FULL_USAGE, None)):
-            output = run_main(argv=['claude-vibeline', '--no-opus'])
+        output = self._run('--no-opus')
         assert 'sess' in output
         assert '30%' not in output
         assert 'sonnet' in output
 
     def test_no_sonnet_hides_only_sonnet(self) -> None:
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(self.FULL_USAGE, None)):
-            output = run_main(argv=['claude-vibeline', '--no-sonnet'])
+        output = self._run('--no-sonnet')
         assert 'opus' in output
         assert '40%' not in output
         assert 'extra' in output
 
     def test_no_extra_hides_only_extra(self) -> None:
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(self.FULL_USAGE, None)):
-            output = run_main(argv=['claude-vibeline', '--no-extra'])
+        output = self._run('--no-extra')
         assert 'sess' in output
         assert 'extra' not in output
