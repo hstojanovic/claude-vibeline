@@ -130,16 +130,15 @@ def usage_parts(args: Args, usage: UsageData | None = None, stale_ts: float | No
     return parts
 
 
-SUPPORTED_EFFORTS: dict[str, set[str]] = {'opus': {'low', 'medium', 'high', 'max'}, 'sonnet': {'low', 'medium', 'high'}}
-
-
-def model_family(model_name: str) -> str:
-    return model_name.split(maxsplit=1)[0].lower() if model_name else ''
+SUPPORTED_EFFORTS: dict[str, set[str]] = {
+    'opus 4.6': {'low', 'medium', 'high', 'max'},
+    'sonnet 4.6': {'low', 'medium', 'high'},
+}
 
 
 def model_section(model_name: str, effort: str) -> str:
-    family = model_family(model_name)
-    supported = SUPPORTED_EFFORTS.get(family)
+    name = model_name.lower()
+    supported = next((v for k, v in SUPPORTED_EFFORTS.items() if name.startswith(k)), None)
     if supported is None:
         return f'{ORANGE}{model_name}{RESET}'
     if effort.rstrip('?') in supported:

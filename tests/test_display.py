@@ -386,6 +386,21 @@ class TestModelSection:
         result = model_section('Sonnet 4.6', 'max?')
         assert '(medium?)' in result
 
+    def test_1m_context_suffix(self) -> None:
+        result = model_section('Opus 4.6 (1M context)', 'high')
+        assert 'Opus 4.6 (1M context)' in result
+        assert '(high)' in result
+
+    def test_legacy_opus_skips_effort(self) -> None:
+        result = model_section('Opus 4.5', 'high')
+        assert 'Opus 4.5' in result
+        assert '(' not in result
+
+    def test_legacy_sonnet_skips_effort(self) -> None:
+        result = model_section('Sonnet 4.5', 'medium')
+        assert 'Sonnet 4.5' in result
+        assert '(' not in result
+
     def test_unknown_model_skips_effort(self) -> None:
         result = model_section('CustomModel 1.0', 'high')
         assert 'CustomModel' in result
