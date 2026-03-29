@@ -17,6 +17,14 @@ if TYPE_CHECKING:
     from claude_vibeline.schema import StdinData, UsageData
 
 
+def cleanup_stale_tmp(directory: Path) -> None:
+    with contextlib.suppress(OSError):
+        for f in directory.iterdir():
+            if f.name.startswith('tmp') and f.name != 'debug.log':
+                with contextlib.suppress(OSError):
+                    f.unlink()
+
+
 def debug_log_path() -> Path:
     return Path(platformdirs.user_log_dir('claude-vibeline')) / 'debug.log'
 
@@ -58,10 +66,12 @@ def write_debug_log(  # noqa: PLR0913, PLR0917
                 os.close(fd)
                 Path(tmp).replace(log)
             except BaseException:
-                os.close(fd)
+                with contextlib.suppress(OSError):
+                    os.close(fd)
                 with contextlib.suppress(OSError):
                     Path(tmp).unlink()
                 raise
+            cleanup_stale_tmp(log.parent)
         else:
             fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
             try:

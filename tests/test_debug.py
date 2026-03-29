@@ -5,7 +5,7 @@ from unittest import mock
 
 from claude_vibeline.args import Args
 from claude_vibeline.constants import DEBUG_LOG_MAX_BYTES, NBSP
-from claude_vibeline.debug import debug_log_path, write_debug_log
+from claude_vibeline.debug import cleanup_stale_tmp, debug_log_path, write_debug_log
 
 if TYPE_CHECKING:
     from claude_vibeline.schema import StdinData, UsageData
@@ -118,6 +118,23 @@ class TestWriteDebugLog:
         entry = json.loads(log_file.read_text(encoding='utf-8').strip())
         assert entry['output'] == 'a b'
 
+    def test_truncation_cleans_up_stale_tmp(self, tmp_path: Path) -> None:
+        log_file = tmp_path / 'debug.log'
+        stale1 = tmp_path / 'tmp9hc05iwg'
+        stale2 = tmp_path / 'tmplx52v8ho'
+        stale1.write_text('old')
+        stale2.write_text('old')
+        lines: list[str] = []
+        while sum(len(ln) for ln in lines) < DEBUG_LOG_MAX_BYTES + 1000:
+            lines.append(json.dumps({'i': len(lines), 'pad': 'x' * 200}) + '\n')
+        log_file.write_text(''.join(lines))
+        args = Args(debug=True)
+        with mock.patch('claude_vibeline.debug.debug_log_path', return_value=log_file):
+            write_debug_log('test output', args)
+        assert not stale1.exists()
+        assert not stale2.exists()
+        assert log_file.exists()
+
     def test_truncation_cleans_up_on_write_error(self, tmp_path: Path) -> None:
         log_file = tmp_path / 'debug.log'
         lines: list[str] = []
@@ -131,3 +148,31 @@ class TestWriteDebugLog:
         ):
             write_debug_log('test output', args)
         assert len(list(tmp_path.glob('*.tmp'))) == 0
+
+    def test_truncation_replace_failure_cleans_up_tmp(self, tmp_path: Path) -> None:
+        log_file = tmp_path / 'debug.log'
+        lines: list[str] = []
+        while sum(len(ln) for ln in lines) < DEBUG_LOG_MAX_BYTES + 1000:
+            lines.append(json.dumps({'i': len(lines), 'pad': 'x' * 200}) + '\n')
+        log_file.write_text(''.join(lines))
+        args = Args(debug=True)
+        with (
+            mock.patch('claude_vibeline.debug.debug_log_path', return_value=log_file),
+            mock.patch('pathlib.Path.replace', side_effect=OSError('locked')),
+        ):
+            write_debug_log('test output', args)
+        assert len(list(tmp_path.glob('tmp*'))) == 0
+
+
+class TestCleanupStaleTmp:
+    def test_removes_tmp_files(self, tmp_path: Path) -> None:
+        (tmp_path / 'tmp12345').write_text('stale')
+        (tmp_path / 'tmpabcdef').write_text('stale')
+        (tmp_path / 'debug.log').write_text('keep')
+        cleanup_stale_tmp(tmp_path)
+        assert not (tmp_path / 'tmp12345').exists()
+        assert not (tmp_path / 'tmpabcdef').exists()
+        assert (tmp_path / 'debug.log').exists()
+
+    def test_ignores_nonexistent_dir(self) -> None:
+        cleanup_stale_tmp(Path('/nonexistent/dir'))
