@@ -78,7 +78,7 @@ def _effort_transcript(effort: str, tmp_path: Path) -> tuple[str, str]:
 
 
 class TestMain:
-    def test_full_pipeline_with_usage(self, tmp_path: Path) -> None:
+    def test_full_pipeline_with_rate_limits(self, tmp_path: Path) -> None:
         transcript_path, session_id = _effort_transcript('high', tmp_path)
         data = {
             **STDIN_DATA,
@@ -89,8 +89,7 @@ class TestMain:
                 'seven_day': {'used_percentage': 3, 'resets_at': 4070908800},
             },
         }
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data, tmp_path=tmp_path)
+        output = run_main(stdin_data=data, tmp_path=tmp_path)
         assert 'my-project' in output
         assert 'Opus' in output
         assert '(high)' in output
@@ -99,59 +98,52 @@ class TestMain:
         assert '3%' in output
         assert '\u2265' not in output
 
-    def test_no_usage_data(self, tmp_path: Path) -> None:
+    def test_no_rate_limits_in_stdin(self, tmp_path: Path) -> None:
         transcript_path, session_id = _effort_transcript('high', tmp_path)
         data = {**STDIN_DATA, 'transcript_path': transcript_path, 'session_id': session_id}
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data, tmp_path=tmp_path)
+        output = run_main(stdin_data=data, tmp_path=tmp_path)
         assert 'my-project' in output
         assert 'Opus' in output
         assert '42%' in output
+        assert 'sess' not in output
 
     def test_no_project_flag(self) -> None:
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(argv=['claude-vibeline', '--no-project'])
+        output = run_main(argv=['claude-vibeline', '--no-project'])
         assert 'my-project' not in output
         assert 'Opus' in output
 
     def test_no_model_flag(self) -> None:
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(argv=['claude-vibeline', '--no-model'])
+        output = run_main(argv=['claude-vibeline', '--no-model'])
         assert 'my-project' in output
         assert 'Opus' not in output
 
     def test_empty_model_name(self) -> None:
         data = {**STDIN_DATA, 'model': {'display_name': ''}}
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data)
+        output = run_main(stdin_data=data)
         assert 'Unknown' in output
 
     def test_context_window_size_shown(self) -> None:
         data = {**STDIN_DATA, 'context_window': {'used_percentage': 42.3, 'context_window_size': 200_000}}
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data)
+        output = run_main(stdin_data=data)
         assert '200k' in output
         assert '42%' in output
 
     def test_context_window_size_1m(self) -> None:
         data = {**STDIN_DATA, 'context_window': {'used_percentage': 10.0, 'context_window_size': 1_000_000}}
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data)
+        output = run_main(stdin_data=data)
         assert '1M' in output
 
     def test_context_window_size_absent(self) -> None:
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main()
+        output = run_main()
         assert '200k' not in output
         assert '1M' not in output
         assert '42%' in output
 
     def test_no_context_flag(self) -> None:
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(argv=['claude-vibeline', '--no-context'])
+        output = run_main(argv=['claude-vibeline', '--no-context'])
         assert '42%' not in output
 
-    def test_no_usage_flag(self) -> None:
+    def test_no_session_hides_stdin_rate_limit(self) -> None:
         data = {
             **STDIN_DATA,
             'rate_limits': {
@@ -159,41 +151,54 @@ class TestMain:
                 'seven_day': {'used_percentage': 5, 'resets_at': 4070908800},
             },
         }
-        output = run_main(stdin_data=data, argv=['claude-vibeline', '--no-usage'])
-        assert 'my-project' in output
+        output = run_main(stdin_data=data, argv=['claude-vibeline', '--no-session'])
         assert 'sess' not in output
+        assert 'week' in output
+
+    def test_no_weekly_hides_stdin_rate_limit(self) -> None:
+        data = {
+            **STDIN_DATA,
+            'rate_limits': {
+                'five_hour': {'used_percentage': 10, 'resets_at': 4070908800},
+                'seven_day': {'used_percentage': 5, 'resets_at': 4070908800},
+            },
+        }
+        output = run_main(stdin_data=data, argv=['claude-vibeline', '--no-weekly'])
+        assert 'sess' in output
         assert 'week' not in output
 
     def test_bar_width_flag(self) -> None:
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(argv=['claude-vibeline', '--bar-width', '4'])
+        output = run_main(argv=['claude-vibeline', '--bar-width', '4'])
         assert output.count(FILL) + output.count(EMPTY) == 4
 
-    def test_extra_usage_shown(self) -> None:
+    def test_usage_flag_enables_api(self) -> None:
         usage_data: UsageData = {'extra_usage': {'is_enabled': True, 'used_credits': 250, 'monthly_limit': 2000}}
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(usage_data, None)):
-            output = run_main()
+            output = run_main(argv=['claude-vibeline', '--usage-api', '--extra'])
         assert 'extra' in output
         assert '2.50' in output
+
+    def test_api_not_called_without_usage_flag(self) -> None:
+        with mock.patch('claude_vibeline.statusline.fetch_usage') as mock_fetch:
+            run_main()
+        mock_fetch.assert_not_called()
 
     def test_max_effort_from_transcript(self, tmp_path: Path) -> None:
         transcript_path, session_id = _effort_transcript('max', tmp_path)
         data = {**STDIN_DATA, 'transcript_path': transcript_path, 'session_id': session_id}
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data, tmp_path=tmp_path)
+        output = run_main(stdin_data=data, tmp_path=tmp_path)
         assert '(max)' in output
 
     def test_haiku_no_effort(self) -> None:
         data = {**STDIN_DATA, 'model': {'display_name': 'Haiku 4.5'}}
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data)
+        output = run_main(stdin_data=data)
         assert 'Haiku' in output
         assert '(' not in output
 
     def test_stale_within_window(self) -> None:
         usage_data: UsageData = {'seven_day_opus': {'utilization': 19, 'resets_at': '2099-01-01T00:00:00+00:00'}}
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(usage_data, time.time() - 120)):
-            output = run_main()
+            output = run_main(argv=['claude-vibeline', '--usage-api', '--opus'])
         assert '\u2265' in output
         assert '19%' in output
         assert '--' not in output
@@ -202,7 +207,7 @@ class TestMain:
     def test_stale_past_reset(self) -> None:
         usage_data: UsageData = {'seven_day_opus': {'utilization': 19, 'resets_at': '2026-03-07T10:00:00+00:00'}}
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(usage_data, time.time() - 120)):
-            output = run_main()
+            output = run_main(argv=['claude-vibeline', '--usage-api', '--opus'])
         assert '?' in output
         assert '\u2265' not in output
 
@@ -227,16 +232,26 @@ class TestMain:
             _mod.sys.stdout.flush()
             assert stdout_buf.getvalue() == b''
 
-    def test_cache_section_shown(self, tmp_path: Path) -> None:
+    def test_cache_section_clock_mode(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
         ts = datetime.now(UTC).isoformat()
         transcript.write_text(_user(ts) + '\n')
 
         data = {**STDIN_DATA, 'transcript_path': str(transcript)}
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data, tmp_path=tmp_path)
+        output = run_main(stdin_data=data, tmp_path=tmp_path)
         assert 'cache' in output
-        assert '\u2713' in output
+        assert '\u25f7' in output
+
+    def test_cache_section_live_mode(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        ts = datetime.now(UTC).isoformat()
+        transcript.write_text(_user(ts) + '\n')
+
+        data = {**STDIN_DATA, 'transcript_path': str(transcript)}
+        with mock.patch('claude_vibeline.statusline.maybe_spawn_cache_updater'):
+            output = run_main(stdin_data=data, tmp_path=tmp_path, argv=['claude-vibeline', '--cache-updater'])
+        assert 'cache' in output
+        assert '\u25f7' in output
 
     def test_cache_expired_shown(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
@@ -244,10 +259,29 @@ class TestMain:
         transcript.write_text(_user(old_ts) + '\n')
 
         data = {**STDIN_DATA, 'transcript_path': str(transcript)}
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data, tmp_path=tmp_path)
+        output = run_main(stdin_data=data, tmp_path=tmp_path)
         assert 'cache' in output
         assert '\u2717' in output
+
+    def test_refresh_flag_spawns_updater(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        ts = datetime.now(UTC).isoformat()
+        transcript.write_text(_user(ts) + '\n')
+
+        data = {**STDIN_DATA, 'transcript_path': str(transcript)}
+        with mock.patch('claude_vibeline.statusline.maybe_spawn_cache_updater') as mock_spawn:
+            run_main(stdin_data=data, tmp_path=tmp_path, argv=['claude-vibeline', '--cache-updater'])
+        mock_spawn.assert_called_once()
+
+    def test_no_updater_by_default(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        ts = datetime.now(UTC).isoformat()
+        transcript.write_text(_user(ts) + '\n')
+
+        data = {**STDIN_DATA, 'transcript_path': str(transcript)}
+        with mock.patch('claude_vibeline.statusline.maybe_spawn_cache_updater') as mock_spawn:
+            run_main(stdin_data=data, tmp_path=tmp_path)
+        mock_spawn.assert_not_called()
 
     def test_no_cache_flag(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
@@ -255,18 +289,14 @@ class TestMain:
         transcript.write_text(_user(ts) + '\n')
 
         data = {**STDIN_DATA, 'transcript_path': str(transcript)}
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data, tmp_path=tmp_path, argv=['claude-vibeline', '--no-cache'])
+        output = run_main(stdin_data=data, tmp_path=tmp_path, argv=['claude-vibeline', '--no-cache'])
         assert 'cache' not in output
 
     def test_debug_logs_to_file(self, tmp_path: Path) -> None:
         transcript_path, session_id = _effort_transcript('high', tmp_path)
         log_file = tmp_path / 'logs' / 'debug.log'
         data = {**STDIN_DATA, 'transcript_path': transcript_path, 'session_id': session_id}
-        with (
-            mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)),
-            mock.patch('claude_vibeline.debug.debug_log_path', return_value=log_file),
-        ):
+        with mock.patch('claude_vibeline.debug.debug_log_path', return_value=log_file):
             run_main(stdin_data=data, tmp_path=tmp_path, argv=['claude-vibeline', '--debug'])
         entry = json.loads(log_file.read_text(encoding='utf-8').strip())
         assert 'my-project' in entry['output']
@@ -274,8 +304,7 @@ class TestMain:
         assert entry['effort'] == 'high'
 
     def test_settings_fallback_effort_shows_question_mark(self) -> None:
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main()
+        output = run_main()
         assert 'Opus 4.6' in output
         assert '(medium?)' in output
 
@@ -288,8 +317,7 @@ class TestMain:
         """
         transcript_path, session_id = _effort_transcript('low', tmp_path)
         data = {**STDIN_DATA, 'transcript_path': transcript_path, 'session_id': session_id}
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data, tmp_path=tmp_path)
+        output = run_main(stdin_data=data, tmp_path=tmp_path)
         assert '(low)' in output
         assert '?' not in ANSI_RE.sub('', output).split('(low)')[1].split(')')[0]
         cached = json.loads((tmp_path / 'sessions' / f'{session_id}.json').read_text())
@@ -299,26 +327,22 @@ class TestMain:
 class TestProjectNameEdgeCases:
     def test_project_dir_dot(self) -> None:
         data = {**STDIN_DATA, 'workspace': {'project_dir': '.'}}
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data)
+        output = run_main(stdin_data=data)
         assert '.' not in ANSI_RE.sub('', output).split()
 
     def test_project_dir_root(self) -> None:
         data = {**STDIN_DATA, 'workspace': {'project_dir': '/'}}
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data)
+        output = run_main(stdin_data=data)
         assert 'Opus' in output
 
     def test_missing_workspace(self) -> None:
         data: StdinData = {'model': {'display_name': 'Opus 4.6'}, 'context_window': {'used_percentage': 10.0}}
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data)
+        output = run_main(stdin_data=data)
         assert 'Opus' in output
 
     def test_empty_workspace(self) -> None:
         data = {**STDIN_DATA, 'workspace': {}}
-        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
-            output = run_main(stdin_data=data)
+        output = run_main(stdin_data=data)
         assert 'Opus' in output
 
 
@@ -338,31 +362,39 @@ class TestIndividualBucketFlags:
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(self.API_USAGE, None)):
             return run_main(stdin_data=data, argv=['claude-vibeline', *extra_argv])
 
-    def test_no_session_hides_only_session(self) -> None:
+    def test_no_session_hides_session(self) -> None:
         output = self._run('--no-session')
         assert 'sess' not in output
         assert 'week' in output
-        assert 'opus' in output
 
-    def test_no_weekly_hides_only_weekly(self) -> None:
+    def test_no_weekly_hides_weekly(self) -> None:
         output = self._run('--no-weekly')
         assert 'sess' in output
-        assert '20%' not in output
-        assert 'opus' in output
+        assert 'week' not in output
 
-    def test_no_opus_hides_only_opus(self) -> None:
-        output = self._run('--no-opus')
-        assert 'sess' in output
-        assert '30%' not in output
+    def test_opus_flag_shows_opus(self) -> None:
+        output = self._run('--usage-api', '--opus')
+        assert 'opus' in output
+        assert '30%' in output
+
+    def test_sonnet_flag_shows_sonnet(self) -> None:
+        output = self._run('--usage-api', '--sonnet')
         assert 'sonnet' in output
+        assert '40%' in output
 
-    def test_no_sonnet_hides_only_sonnet(self) -> None:
-        output = self._run('--no-sonnet')
-        assert 'opus' in output
-        assert '40%' not in output
+    def test_extra_flag_shows_extra(self) -> None:
+        output = self._run('--usage-api', '--extra')
         assert 'extra' in output
+        assert '5.00' in output
 
-    def test_no_extra_hides_only_extra(self) -> None:
-        output = self._run('--no-extra')
-        assert 'sess' in output
+    def test_usage_without_flags_shows_nothing_extra(self) -> None:
+        output = self._run('--usage-api')
+        assert 'opus' not in output
+        assert 'sonnet' not in output
         assert 'extra' not in output
+
+    def test_api_not_called_without_usage(self) -> None:
+        data = {**STDIN_DATA, 'rate_limits': self.STDIN_LIMITS}
+        with mock.patch('claude_vibeline.statusline.fetch_usage') as mock_fetch:
+            run_main(stdin_data=data, argv=['claude-vibeline', '--opus', '--sonnet'])
+        mock_fetch.assert_not_called()

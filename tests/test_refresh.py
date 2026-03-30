@@ -6,7 +6,14 @@ from typing import Any, ClassVar
 from unittest import mock
 
 from claude_vibeline import __version__ as app_version
-from claude_vibeline.refresh import is_lock_owner, run_refresh_loop, spawn_cache_updater, toggle_settings_space
+from claude_vibeline.refresh import (
+    is_lock_owner,
+    maybe_spawn_cache_updater,
+    refresh_lock_path,
+    run_refresh_loop,
+    spawn_cache_updater,
+    toggle_settings_space,
+)
 
 
 class TestToggleSettingsSpace:
@@ -317,3 +324,28 @@ class TestRefreshIntegration:
             t.start()
             t.join(timeout=5)
         assert not lock.exists()
+
+
+class TestRefreshLockPath:
+    def test_returns_expected_path(self) -> None:
+        path = refresh_lock_path()
+        assert isinstance(path, Path)
+        assert path.name == 'refresh.lock'
+        assert 'claude-vibeline' in str(path)
+
+
+class TestMaybeSpawnCacheUpdater:
+    def test_none_timestamp_skips(self) -> None:
+        with mock.patch('claude_vibeline.refresh.spawn_cache_updater') as mock_spawn:
+            maybe_spawn_cache_updater(None)
+        mock_spawn.assert_not_called()
+
+    def test_expired_timestamp_skips(self) -> None:
+        with mock.patch('claude_vibeline.refresh.spawn_cache_updater') as mock_spawn:
+            maybe_spawn_cache_updater(time.time() - 600)
+        mock_spawn.assert_not_called()
+
+    def test_active_timestamp_spawns(self) -> None:
+        with mock.patch('claude_vibeline.refresh.spawn_cache_updater') as mock_spawn:
+            maybe_spawn_cache_updater(time.time())
+        mock_spawn.assert_called_once()

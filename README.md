@@ -8,13 +8,11 @@
 [![License](https://img.shields.io/pypi/l/claude-vibeline)](https://github.com/hstojanovic/claude-vibeline/blob/master/LICENSE)
 [![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-D97757?logo=claude&logoColor=white)](https://claude.com/product/claude-code)
 
-A custom statusline for [Claude Code](https://claude.com/product/claude-code) that shows session details, prompt cache status, and real **subscription** usage data — designed for Pro, Max, and Team users.
-
-Unlike token-based cost trackers, Claude Vibeline shows your actual rate limit utilization and reset countdowns as reported by Anthropic, alongside context window usage, effort level, and a live cache countdown.
+A custom statusline for [Claude Code](https://claude.com/product/claude-code) that shows session details, prompt cache status, and rate limits — designed for Pro, Max, and Team users.
 
 ```
-my-project │ Opus 4.6 (high) │ cache ✓ 4m │ ctx 200k [###-----] 42% │
-sess [##------] 19% 3h12m │ week [--------] 3% 5d20h │ extra 1.23/20€ 7d0h
+my-project │ Opus 4.6 (high) │ cache ◷ 14:35 │ ctx 1M [###-----] 42% │
+sess [##------] 19% 3h12m │ week [--------] 3% 5d20h
 ```
 
 Sections wrap to multiple lines based on `--columns` width, with a trailing `│` to indicate continuation.
@@ -26,13 +24,13 @@ Sections wrap to multiple lines based on `--columns` width, with a trailing `│
 From Claude Code's session data:
 - **Project & model** - project name, active model, and effort level (resolved from session transcript with `settings.json` fallback)
 - **Context window** - how much of the context window is used, with size indicator (e.g. `200k`, `1M`)
-- **Prompt cache** - live countdown of the 5-minute prompt cache TTL (see [Prompt cache](#prompt-cache))
+- **Prompt cache** - 5-minute prompt cache TTL, shown as an expiration clock time or a live countdown with `--cache-updater`
 - **Session limit** - 5-hour rate limit utilization with reset countdown
 - **Weekly limit** - 7-day rate limit utilization with reset countdown
 
-From Anthropic's OAuth API (subscription rate limits, not per-token costs):
-- **Per-model limits** - weekly Opus and Sonnet limits with reset countdowns, shown when applicable
-- **Extra usage** - spend against your monthly extra usage cap with reset countdown, shown only if enabled
+Opt-in via `--usage-api` (from Anthropic's OAuth API):
+- **Per-model limits** - weekly Opus and Sonnet limits with reset countdowns
+- **Extra usage** - spend against your monthly extra usage cap with reset countdown
 
 Every section is individually toggleable via CLI flags.
 
@@ -76,52 +74,61 @@ Add to `~/.claude/settings.json`:
 | `--no-project` | Hide project name |
 | `--no-model` | Hide model and effort level |
 | `--no-cache` | Hide prompt cache status |
-| `--no-refresh` | Disable background cache timer refresh |
+| `--cache-updater` | Spawn background process to refresh cache countdown (off by default) |
 | `--no-context` | Hide context window usage |
-| `--no-usage` | Skip fetching usage data entirely |
-| `--no-session` | Hide session (5h) usage |
-| `--no-weekly` | Hide weekly (7d) usage |
-| `--no-opus` | Hide weekly Opus usage |
-| `--no-sonnet` | Hide weekly Sonnet usage |
-| `--no-extra` | Hide extra usage spend |
+| `--no-session` | Hide session (5h) rate limit |
+| `--no-weekly` | Hide weekly (7d) rate limit |
+| `--usage-api` | Fetch per-model and extra usage from OAuth API (off by default) |
+| `--opus` | Show weekly Opus rate limit (requires `--usage-api`) |
+| `--sonnet` | Show weekly Sonnet rate limit (requires `--usage-api`) |
+| `--extra` | Show extra usage spend (requires `--usage-api`) |
 | `--debug` | Log each statusline output to debug file |
 
-Example with customizations:
+Example with all API sections enabled:
 
 ```jsonc
 {
   // ...
   "statusLine": {
     "type": "command",
-    "command": "claude-vibeline --bar-width 5 --currency $ --no-cache --no-opus --no-sonnet"
+    "command": "claude-vibeline --usage-api --opus --sonnet --extra --currency $"
   }
 }
 ```
 
 ```
-my-project │ Opus 4.6 (high) │ ctx 200k [##---] 42% │ sess [#----] 19% 3h12m │
-week [-----] 3% 5d20h │ extra 1.23/20$ 7d0h
+my-project │ Opus 4.6 (high) │ cache ◷ 14:35 │ ctx 1M [###-----] 42% │
+sess [##------] 19% 3h12m │ week [--------] 3% 5d20h │
+opus [#-------] 10% 5d20h │ sonnet [--------] 2% 5d20h │
+extra 1.23/20$ 7d0h
 ```
 
-## Usage data
+## Rate limits
 
-Session and weekly limits are read directly from Claude Code's stdin data — no API call needed.
+### Stdin rate limits
 
-Per-model and extra usage data is fetched from an Anthropic OAuth endpoint (see [Limitations](#limitations)). It requires a valid OAuth token from a Claude Pro, Max, or Team subscription. Responses are cached locally for 60 seconds. Cached usage data is used when the token expires or the API is unavailable. If no token or cache exists, these sections are omitted. The API is only called when per-model or extra usage sections are enabled.
+Session and weekly limits are read directly from Claude Code's session data — no API call or authentication needed. Shown by default; disable with `--no-session` or `--no-weekly`.
 
-Use `--no-usage` to disable all usage sections.
+### OAuth API usage
+
+Per-model and extra usage data is fetched from an undocumented Anthropic OAuth endpoint (see [Limitations](#limitations)).
+
+- Requires a valid OAuth token from a Claude Pro, Max, or Team subscription.
+- Responses are cached locally for 60 seconds, and the cache is reused when the token expires or the API is unavailable.
+- If no token or cache exists, these sections are omitted.
+- The API is only called when `--usage-api` is passed with at least one of `--opus`, `--sonnet`, or `--extra`.
 
 ## Prompt cache
 
 Tracks the 5-minute prompt cache TTL. Each user message or tool use result resets the timer. Computed from timestamps in the session transcript.
 
 Status icons:
-- `✓` — warm
+- `◷` — warm
 - `⚠` — warm, but expiring soon
 - `✗` — expired
-- `!` — expired at some point since the last user message
+- `↻` — expired at some point since the last user message (prefix)
 
-See [Cache timer refresh](#cache-timer-refresh) for how the countdown stays live between invocations.
+By default, the time is an absolute clock time — upcoming expiry for warm caches (`◷ 14:35`), past expiry for expired ones (`✗ 14:30`). With `--cache-updater`, it becomes a live countdown (`◷ 4m`, `✗ 0s`).
 
 ## Session data caching
 
@@ -132,38 +139,40 @@ Claude Vibeline caches per-session data to avoid redundant transcript parsing on
 
 Stale session files (older than 30 days) are cleaned up on every write.
 
-## Cache timer refresh
+## Cache updater
 
-To keep the cache countdown updating in real time, Claude Vibeline spawns a background process that **modifies your `~/.claude/settings.json`** every 30 seconds. It toggles a trailing space in the `statusLine.command` value, which causes Claude Code to re-invoke the statusline and redraw the countdown. The background process runs until the cache expires and then cleans up after itself.
+This feature is **off by default** because it modifies your `~/.claude/settings.json`.
+
+When enabled with `--cache-updater`, Claude Vibeline spawns a background process that toggles a trailing space in the `statusLine.command` value every 30 seconds. This causes Claude Code to re-invoke the statusline and redraw the cache countdown. The background process runs until the cache expires and then cleans up after itself.
 
 Since Claude Code does not provide a push mechanism for statusline updates, this settings toggle is used to force a re-render.
 
 Because this edits your settings file, be aware that:
 
-- Concurrent manual edits to `settings.json` while the refresh process is running could conflict (writes are atomic, but a read-modify-write race is possible).
+- Concurrent manual edits to `settings.json` while the cache updater is running could conflict (writes are atomic, but a read-modify-write race is possible).
 - Tools that watch `settings.json` for changes will see repeated modifications.
 
-To disable this behavior, pass `--no-refresh`:
+To enable:
 
 ```jsonc
 {
   // ...
   "statusLine": {
     "type": "command",
-    "command": "claude-vibeline --no-refresh"
+    "command": "claude-vibeline --cache-updater"
   }
 }
 ```
 
-With `--no-refresh`, the cache section still appears but only updates when Claude Code naturally re-invokes the statusline (e.g., after each assistant response).
+Without `--cache-updater`, the cache section shows the expiration clock time — an absolute value that remains accurate without re-invocation. The live countdown (`◷ 4m`) requires the updater to stay current.
 
 ## Local data
 
-All locally cached data (usage responses, session state, refresh lock) is version-stamped and automatically invalidated on upgrade.
+All locally cached data (usage responses, session state, updater lock) is version-stamped and automatically invalidated on upgrade.
 
 ## Limitations
 
-- **Undocumented APIs** — the OAuth usage endpoint is undocumented and may break without notice. The cache timer refresh mechanism (see [above](#cache-timer-refresh)) relies on undocumented Claude Code behavior and may also break.
+- **Undocumented APIs** — the OAuth usage endpoint is undocumented and may break without notice. The cache updater mechanism (see [above](#cache-updater)) relies on undocumented Claude Code behavior and may also break.
 - **Limited stdin data** — the statusline process receives only a JSON blob on stdin. Claude Code's own CLI arguments (e.g. `--model`) and internal environment variables are not accessible.
 - **Effort level is inferred** — effort is not provided in stdin. It is resolved from the session transcript by scanning for `/model` and `/effort` commands, with a `settings.json` fallback shown with `?` suffix. After session resume, effort resets to the `?` fallback until `/effort` or `/model` is used.
 - **No session fork support** — forked sessions share a transcript file. The prompt cache countdown and effort detection may be inaccurate because messages from all forks are interleaved.

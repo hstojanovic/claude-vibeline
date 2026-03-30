@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 def collect_usage(args: Args, data: StdinData) -> tuple[list[str], UsageData | None, float | None]:
     parts: list[str] = []
     stdin_limits = data.get('rate_limits')
-    if args.usage and stdin_limits is not None:
+    if stdin_limits is not None:
         parts.extend(stdin_usage_parts(args, stdin_limits))
     api_usage: UsageData | None = None
     stale_ts: float | None = None
@@ -66,7 +66,9 @@ def main() -> None:
 
     last_user_ts: float | None = None
     if args.cache:
-        section, last_user_ts = prompt_cache_section(data.get('transcript_path'), data.get('session_id'))
+        section, last_user_ts = prompt_cache_section(
+            data.get('transcript_path'), data.get('session_id'), live=args.refresh
+        )
         if section is not None:
             parts.append(section)
 

@@ -76,28 +76,50 @@ class TestFormatCacheCountdown:
 
 
 class TestCacheSection:
-    def test_warm(self) -> None:
-        result = cache_section(250, gap=False)
-        assert '\u2713' in result
+    def test_live_warm(self) -> None:
+        result = cache_section(250, gap=False, live=True)
+        assert '\u25f7' in result
         assert 'cache' in result
 
-    def test_low(self) -> None:
-        result = cache_section(CACHE_LOW_THRESHOLD, gap=False)
+    def test_live_low(self) -> None:
+        result = cache_section(CACHE_LOW_THRESHOLD, gap=False, live=True)
         assert '\u26a0' in result
 
-    def test_expired(self) -> None:
-        result = cache_section(0, gap=False)
+    def test_live_expired(self) -> None:
+        result = cache_section(0, gap=False, live=True)
+        assert '\u2717' in result
+        assert '0s' in result
+
+    def test_live_gap_shown(self) -> None:
+        result = cache_section(250, gap=True, live=True)
+        assert '\u21bb' in result
+        assert '\u25f7' in result
+
+    def test_live_gap_on_expired(self) -> None:
+        result = cache_section(0, gap=True, live=True)
+        assert '\u21bb' in result
         assert '\u2717' in result
 
-    def test_gap_shown(self) -> None:
-        result = cache_section(250, gap=True)
-        assert '!' in result
-        assert '\u2713' in result
+    def test_clock_warm(self) -> None:
+        result = cache_section(250, gap=False, live=False)
+        assert '\u25f7' in result
+        assert ':' in result
+        assert 'cache' in result
 
-    def test_gap_on_expired(self) -> None:
-        result = cache_section(0, gap=True)
-        assert '!' in result
+    def test_clock_low(self) -> None:
+        result = cache_section(CACHE_LOW_THRESHOLD, gap=False, live=False)
+        assert '\u26a0' in result
+        assert ':' in result
+
+    def test_clock_expired(self) -> None:
+        result = cache_section(-60, gap=False, live=False)
         assert '\u2717' in result
+        assert ':' in result
+
+    def test_clock_gap_shown(self) -> None:
+        result = cache_section(250, gap=True, live=False)
+        assert '\u21bb' in result
+        assert '\u25f7' in result
 
 
 class TestIsPast:
@@ -404,11 +426,11 @@ class TestStdinUsageParts:
 
 class TestApiUsageParts:
     def test_empty_usage_data(self) -> None:
-        args = Args()
+        args = Args(opus=True)
         assert api_usage_parts(args, {}) == []
 
-    def test_all_buckets_disabled(self) -> None:
-        args = Args(opus=False, sonnet=False, extra=False)
+    def test_all_disabled_by_default(self) -> None:
+        args = Args()
         usage: UsageData = {
             'seven_day_opus': {'utilization': 50},
             'extra_usage': {'is_enabled': True, 'used_credits': 100},

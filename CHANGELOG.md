@@ -10,7 +10,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- Change session and weekly usage to read from stdin `rate_limits` instead of OAuth API, skipping the API call when only session/weekly sections are enabled
+- **Breaking:** Rename `--no-usage` to `--usage-api`, off by default
+- **Breaking:** Replace `--no-opus`, `--no-sonnet`, `--no-extra` with `--opus`, `--sonnet`, `--extra` (all opt-in, require `--usage-api`)
+- **Breaking:** Rename `--no-refresh` to `--cache-updater`, off by default
+- Change session and weekly rate limits to read from stdin `rate_limits` instead of the OAuth API; these sections no longer require a subscription token
+- Change cache icon from `✓` to `◷` and default display from live countdown (`✓ 4m`) to absolute clock time (`◷ 14:35` upcoming, `✗ 14:30` past); live countdown is opt-in via `--cache-updater`
+- Change cache gap indicator from `!↻` to `↻`
 
 ### Fixed
 

@@ -61,7 +61,9 @@ def has_cache_gap(timestamps: list[float], last_user_idx: int | None = None) -> 
     return any(timestamps[i] - timestamps[i + 1] > PROMPT_CACHE_TTL for i in range(end))
 
 
-def prompt_cache_section(transcript_path: str | None, session_id: str | None = None) -> tuple[str | None, float | None]:
+def prompt_cache_section(
+    transcript_path: str | None, session_id: str | None = None, *, live: bool = False
+) -> tuple[str | None, float | None]:
     """
     Return (section_string, last_user_timestamp).
     """
@@ -77,6 +79,6 @@ def prompt_cache_section(transcript_path: str | None, session_id: str | None = N
         last_ts = timestamps[0]
         if session_id is not None:
             write_session_cache(session_id, {'last_user_ts': last_ts})
-    secs_left = max(0, int(last_ts + PROMPT_CACHE_TTL - time.time()))
+    secs_left = int(last_ts + PROMPT_CACHE_TTL - time.time())
     gap = has_cache_gap(timestamps, last_user_idx)
-    return cache_section(secs_left, gap=gap), last_ts
+    return cache_section(secs_left, gap=gap, live=live), last_ts

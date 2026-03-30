@@ -16,24 +16,37 @@ class Args:
     model: Annotated[bool, cappa.Arg(long='--no-model', help='hide model and effort level', show_default=False)] = True
     cache: Annotated[bool, cappa.Arg(long='--no-cache', help='hide prompt cache status', show_default=False)] = True
     refresh: Annotated[
-        bool, cappa.Arg(long='--no-refresh', help='disable background cache timer refresh', show_default=False)
-    ] = True
+        bool,
+        cappa.Arg(
+            long='--cache-updater', help='spawn background process to refresh cache countdown', show_default=False
+        ),
+    ] = False
     context: Annotated[
         bool, cappa.Arg(long=['--no-context', '--no-ctx'], help='hide context window usage', show_default=False)
     ] = True
-    usage: Annotated[
-        bool, cappa.Arg(long='--no-usage', help='skip fetching usage data entirely', show_default=False)
-    ] = True
     session: Annotated[
         bool,
-        cappa.Arg(long=['--no-session', '--no-sess', '--no-5h'], help='hide session (5h) usage', show_default=False),
+        cappa.Arg(
+            long=['--no-session', '--no-sess', '--no-5h'], help='hide session (5h) rate limit', show_default=False
+        ),
     ] = True
     weekly: Annotated[
-        bool, cappa.Arg(long=['--no-weekly', '--no-week', '--no-7d'], help='hide weekly (7d) usage', show_default=False)
+        bool,
+        cappa.Arg(long=['--no-weekly', '--no-week', '--no-7d'], help='hide weekly (7d) rate limit', show_default=False),
     ] = True
-    opus: Annotated[bool, cappa.Arg(long='--no-opus', help='hide weekly Opus usage', show_default=False)] = True
-    sonnet: Annotated[bool, cappa.Arg(long='--no-sonnet', help='hide weekly Sonnet usage', show_default=False)] = True
-    extra: Annotated[bool, cappa.Arg(long='--no-extra', help='hide extra usage spend', show_default=False)] = True
+    usage: Annotated[
+        bool, cappa.Arg(long='--usage-api', help='fetch per-model and extra usage from OAuth API', show_default=False)
+    ] = False
+    opus: Annotated[
+        bool, cappa.Arg(long='--opus', help='show weekly Opus rate limit (requires --usage-api)', show_default=False)
+    ] = False
+    sonnet: Annotated[
+        bool,
+        cappa.Arg(long='--sonnet', help='show weekly Sonnet rate limit (requires --usage-api)', show_default=False),
+    ] = False
+    extra: Annotated[
+        bool, cappa.Arg(long='--extra', help='show extra usage spend (requires --usage-api)', show_default=False)
+    ] = False
     debug: Annotated[bool, cappa.Arg(long='--debug', help='log each output to debug file', show_default=False)] = False
 
     version: Annotated[
