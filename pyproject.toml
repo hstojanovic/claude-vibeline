@@ -32,7 +32,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "freezegun==1.5.5",
-    "pytest==9.0.2",
+    "pytest==9.0.3",
     "pytest-cov==7.1.0",
     "responses==0.26.0",
     "ruff==0.15.8",
