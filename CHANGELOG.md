@@ -8,6 +8,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-04-17
+
 ### Changed
 
 - **Breaking:** Rename `--no-usage` to `--usage-api`, off by default
