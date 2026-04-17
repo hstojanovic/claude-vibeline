@@ -248,24 +248,13 @@ class TestMain:
             _mod.sys.stdout.flush()
             assert stdout_buf.getvalue() == b''
 
-    def test_cache_section_clock_mode(self, tmp_path: Path) -> None:
+    def test_cache_section_shown(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
         ts = datetime.now(UTC).isoformat()
         transcript.write_text(_user(ts) + '\n')
 
         data = {**STDIN_DATA, 'transcript_path': str(transcript)}
         output = run_main(stdin_data=data, tmp_path=tmp_path)
-        assert 'cache' in output
-        assert '\u25f7' in output
-
-    def test_cache_section_live_mode(self, tmp_path: Path) -> None:
-        transcript = tmp_path / 'session.jsonl'
-        ts = datetime.now(UTC).isoformat()
-        transcript.write_text(_user(ts) + '\n')
-
-        data = {**STDIN_DATA, 'transcript_path': str(transcript)}
-        with mock.patch('claude_vibeline.statusline.maybe_spawn_cache_updater'):
-            output = run_main(stdin_data=data, tmp_path=tmp_path, argv=['claude-vibeline', '--cache-updater'])
         assert 'cache' in output
         assert '\u25f7' in output
 
@@ -278,26 +267,6 @@ class TestMain:
         output = run_main(stdin_data=data, tmp_path=tmp_path)
         assert 'cache' in output
         assert '\u2717' in output
-
-    def test_refresh_flag_spawns_updater(self, tmp_path: Path) -> None:
-        transcript = tmp_path / 'session.jsonl'
-        ts = datetime.now(UTC).isoformat()
-        transcript.write_text(_user(ts) + '\n')
-
-        data = {**STDIN_DATA, 'transcript_path': str(transcript)}
-        with mock.patch('claude_vibeline.statusline.maybe_spawn_cache_updater') as mock_spawn:
-            run_main(stdin_data=data, tmp_path=tmp_path, argv=['claude-vibeline', '--cache-updater'])
-        mock_spawn.assert_called_once()
-
-    def test_no_updater_by_default(self, tmp_path: Path) -> None:
-        transcript = tmp_path / 'session.jsonl'
-        ts = datetime.now(UTC).isoformat()
-        transcript.write_text(_user(ts) + '\n')
-
-        data = {**STDIN_DATA, 'transcript_path': str(transcript)}
-        with mock.patch('claude_vibeline.statusline.maybe_spawn_cache_updater') as mock_spawn:
-            run_main(stdin_data=data, tmp_path=tmp_path)
-        mock_spawn.assert_not_called()
 
     def test_no_cache_flag(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'

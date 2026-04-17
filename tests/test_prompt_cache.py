@@ -171,14 +171,14 @@ class TestHasCacheGap:
 
 class TestPromptCacheSection:
     def test_no_transcript(self) -> None:
-        assert prompt_cache_section(None) == (None, None)
+        assert prompt_cache_section(None) is None
 
     def test_warm_cache(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
         ts = datetime.now(UTC).isoformat()
         transcript.write_text(_user(ts) + '\n')
 
-        result, _ = prompt_cache_section(str(transcript), live=True)
+        result = prompt_cache_section(str(transcript))
         assert result is not None
         assert 'cache' in result
         assert '\u25f7' in result
@@ -189,7 +189,7 @@ class TestPromptCacheSection:
         ts = (datetime.now(UTC) - timedelta(seconds=PROMPT_CACHE_TTL - CACHE_LOW_THRESHOLD + 10)).isoformat()
         transcript.write_text(_user(ts) + '\n')
 
-        result, _ = prompt_cache_section(str(transcript), live=True)
+        result = prompt_cache_section(str(transcript))
         assert result is not None
         assert '\u26a0' in result
         assert '\u25f7' not in result
@@ -199,7 +199,7 @@ class TestPromptCacheSection:
         old_ts = (datetime.now(UTC) - timedelta(seconds=PROMPT_CACHE_TTL + 10)).isoformat()
         transcript.write_text(_user(old_ts) + '\n')
 
-        result, _ = prompt_cache_section(str(transcript), live=True)
+        result = prompt_cache_section(str(transcript))
         assert result is not None
         assert '\u2717' in result
         assert 'm' not in ANSI_RE.sub('', result).split('\u2717')[-1]
@@ -212,7 +212,7 @@ class TestPromptCacheSection:
         lines = [_user(user_ts), _assistant(user_ts), _tool_result(recent_ts)]
         transcript.write_text('\n'.join(lines) + '\n')
 
-        result, _ = prompt_cache_section(str(transcript), live=True)
+        result = prompt_cache_section(str(transcript))
         assert result is not None
         assert '\u21bb' in result
         assert '\u25f7' in result
@@ -226,7 +226,7 @@ class TestPromptCacheSection:
         lines = [_user(user_ts), _assistant(user_ts), _tool_result(recent_ts)]
         transcript.write_text('\n'.join(lines) + '\n')
 
-        result, _ = prompt_cache_section(str(transcript), live=True)
+        result = prompt_cache_section(str(transcript))
         assert result is not None
         assert '\u25f7' in result
         assert '\u21bb' not in result
@@ -237,7 +237,7 @@ class TestPromptCacheSection:
         ts = datetime.now(UTC).isoformat()
         transcript.write_text(_user(ts) + '\n')
 
-        result, _ = prompt_cache_section(str(transcript), live=True)
+        result = prompt_cache_section(str(transcript))
         assert result is not None
         assert '\u21bb' not in result
 
@@ -253,7 +253,7 @@ class TestPromptCacheSection:
         ]
         transcript.write_text('\n'.join(lines) + '\n')
 
-        result, _ = prompt_cache_section(str(transcript), live=True)
+        result = prompt_cache_section(str(transcript))
         assert result is not None
         assert '\u25f7' in result
         assert '\u21bb' not in result
@@ -270,14 +270,14 @@ class TestPromptCacheSection:
         ]
         transcript.write_text('\n'.join(lines) + '\n')
 
-        result, _ = prompt_cache_section(str(transcript), live=True)
+        result = prompt_cache_section(str(transcript))
         assert result is not None
         assert '\u21bb' in result
 
     def test_no_user_messages(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
         transcript.write_text(_assistant('2026-03-07T10:00:00Z') + '\n')
-        assert prompt_cache_section(str(transcript), live=True) == (None, None)
+        assert prompt_cache_section(str(transcript)) is None
 
     def test_caches_last_user_ts(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
@@ -286,10 +286,9 @@ class TestPromptCacheSection:
         cache_dir = tmp_path / 'cache'
         cache_dir.mkdir()
         with mock.patch('claude_vibeline.effort.session_cache_dir', return_value=cache_dir):
-            _, last_ts = prompt_cache_section(str(transcript), 'sess-1', live=True)
-            assert last_ts is not None
+            prompt_cache_section(str(transcript), 'sess-1')
             cached = read_session_cache('sess-1')
-            assert cached['last_user_ts'] == last_ts
+            assert 'last_user_ts' in cached
 
     def test_falls_back_to_cached_last_user_ts(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
@@ -299,8 +298,7 @@ class TestPromptCacheSection:
         cached_ts = time.time() - 60
         (cache_dir / 'sess-1.json').write_text(json.dumps({'last_user_ts': cached_ts, '_v': app_version}))
         with mock.patch('claude_vibeline.effort.session_cache_dir', return_value=cache_dir):
-            result, last_ts = prompt_cache_section(str(transcript), 'sess-1', live=True)
-        assert last_ts == cached_ts
+            result = prompt_cache_section(str(transcript), 'sess-1')
         assert result is not None
         assert '\u25f7' in result
 

@@ -19,7 +19,6 @@ from claude_vibeline.display import (
 )
 from claude_vibeline.effort import refine_effort_for_model, resolve_effort
 from claude_vibeline.prompt_cache import prompt_cache_section
-from claude_vibeline.refresh import maybe_spawn_cache_updater
 from claude_vibeline.usage import fetch_usage
 
 if TYPE_CHECKING:
@@ -65,11 +64,8 @@ def main() -> None:
     if args.model:
         parts.append(model_section(model_name, effort))
 
-    last_user_ts: float | None = None
     if args.cache:
-        section, last_user_ts = prompt_cache_section(
-            data.get('transcript_path'), data.get('session_id'), live=args.refresh
-        )
+        section = prompt_cache_section(data.get('transcript_path'), data.get('session_id'))
         if section is not None:
             parts.append(section)
 
@@ -83,9 +79,6 @@ def main() -> None:
 
     output = wrap_parts(parts, args.columns)
     print(output)
-
-    if args.cache and args.refresh:
-        maybe_spawn_cache_updater(last_user_ts)
 
     if args.debug:
         write_debug_log(output, args, stdin_data=data, usage_data=api_usage, stale_ts=stale_ts, effort=effort)

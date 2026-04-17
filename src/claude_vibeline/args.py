@@ -15,12 +15,6 @@ class Args:
     project: Annotated[bool, cappa.Arg(long='--no-project', help='hide project name', show_default=False)] = True
     model: Annotated[bool, cappa.Arg(long='--no-model', help='hide model and effort level', show_default=False)] = True
     cache: Annotated[bool, cappa.Arg(long='--no-cache', help='hide prompt cache status', show_default=False)] = True
-    refresh: Annotated[
-        bool,
-        cappa.Arg(
-            long='--cache-updater', help='spawn background process to refresh cache countdown', show_default=False
-        ),
-    ] = False
     context: Annotated[
         bool, cappa.Arg(long=['--no-context', '--no-ctx'], help='hide context window usage', show_default=False)
     ] = True

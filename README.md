@@ -11,7 +11,7 @@
 A custom statusline for [Claude Code](https://claude.com/product/claude-code) that shows session details, prompt cache status, and rate limits — designed for Pro, Max, and Team users.
 
 ```
-my-project │ Opus 4.7 (xhigh) │ cache ◷ 14:35 │ ctx 1M [###-----] 42% │
+my-project │ Opus 4.7 (xhigh) │ cache ◷ 4m │ ctx 1M [###-----] 42% │
 sess [##------] 19% 3h12m │ week [--------] 3% 5d20h
 ```
 
@@ -24,7 +24,7 @@ Sections wrap to multiple lines based on `--columns` width, with a trailing `│
 From Claude Code's session data:
 - **Project & model** - project name, active model, and effort level (resolved from session transcript with `settings.json` fallback)
 - **Context window** - how much of the context window is used, with size indicator (e.g. `200k`, `1M`)
-- **Prompt cache** - 5-minute prompt cache TTL, shown as an expiration clock time or a live countdown with `--cache-updater`
+- **Prompt cache** - 5-minute prompt cache TTL, shown as a live countdown
 - **Session limit** - 5-hour rate limit utilization with reset countdown
 - **Weekly limit** - 7-day rate limit utilization with reset countdown
 
@@ -59,10 +59,13 @@ Add to `~/.claude/settings.json`:
   // ...
   "statusLine": {
     "type": "command",
-    "command": "claude-vibeline"
+    "command": "claude-vibeline",
+    "refreshIntervalSeconds": 30
   }
 }
 ```
+
+`refreshIntervalSeconds` tells Claude Code to re-invoke the statusline at the given interval so the prompt cache countdown stays current.
 
 ## Options
 
@@ -74,7 +77,6 @@ Add to `~/.claude/settings.json`:
 | `--no-project` | Hide project name |
 | `--no-model` | Hide model and effort level |
 | `--no-cache` | Hide prompt cache status |
-| `--cache-updater` | Spawn background process to refresh cache countdown (off by default) |
 | `--no-context` | Hide context window usage |
 | `--no-session` | Hide session (5h) rate limit |
 | `--no-weekly` | Hide weekly (7d) rate limit |
@@ -97,7 +99,7 @@ Example with all API sections enabled:
 ```
 
 ```
-my-project │ Opus 4.7 (xhigh) │ cache ◷ 14:35 │ ctx 1M [###-----] 42% │
+my-project │ Opus 4.7 (xhigh) │ cache ◷ 4m │ ctx 1M [###-----] 42% │
 sess [##------] 19% 3h12m │ week [--------] 3% 5d20h │
 opus [#-------] 10% 5d20h │ sonnet [--------] 2% 5d20h │
 extra 1.23/20$ 7d0h
@@ -128,7 +130,7 @@ Status icons:
 - `✗` — expired
 - `↻` — expired at some point since the last user message (prefix)
 
-By default, the time is an absolute clock time — upcoming expiry for warm caches (`◷ 14:35`), past expiry for expired ones (`✗ 14:30`). With `--cache-updater`, it becomes a live countdown (`◷ 4m`, `✗ 0s`).
+The countdown is live (`◷ 4m`, `⚠ 47s`, `✗ 0s`), so set `refreshIntervalSeconds` in your statusline config to keep it current.
 
 ## Session data caching
 
@@ -139,40 +141,13 @@ Claude Vibeline caches per-session data to avoid redundant transcript parsing on
 
 Stale session files (older than 30 days) are cleaned up on every write.
 
-## Cache updater
-
-This feature is **off by default** because it modifies your `~/.claude/settings.json`.
-
-When enabled with `--cache-updater`, Claude Vibeline spawns a background process that toggles a trailing space in the `statusLine.command` value every 30 seconds. This causes Claude Code to re-invoke the statusline and redraw the cache countdown. The background process runs until the cache expires and then cleans up after itself.
-
-Since Claude Code does not provide a push mechanism for statusline updates, this settings toggle is used to force a re-render.
-
-Because this edits your settings file, be aware that:
-
-- Concurrent manual edits to `settings.json` while the cache updater is running could conflict (writes are atomic, but a read-modify-write race is possible).
-- Tools that watch `settings.json` for changes will see repeated modifications.
-
-To enable:
-
-```jsonc
-{
-  // ...
-  "statusLine": {
-    "type": "command",
-    "command": "claude-vibeline --cache-updater"
-  }
-}
-```
-
-Without `--cache-updater`, the cache section shows the expiration clock time — an absolute value that remains accurate without re-invocation. The live countdown (`◷ 4m`) requires the updater to stay current.
-
 ## Local data
 
-All locally cached data (usage responses, session state, updater lock) is version-stamped and automatically invalidated on upgrade.
+All locally cached data (usage responses, session state) is version-stamped and automatically invalidated on upgrade.
 
 ## Limitations
 
-- **Undocumented APIs** — the OAuth usage endpoint is undocumented and may break without notice. The cache updater mechanism (see [above](#cache-updater)) relies on undocumented Claude Code behavior and may also break.
+- **Undocumented API** — the OAuth usage endpoint is undocumented and may break without notice.
 - **Limited stdin data** — the statusline process receives only a JSON blob on stdin. Claude Code's own CLI arguments (e.g. `--model`) and internal environment variables are not accessible.
 - **Effort level is inferred** — effort is not provided in stdin. It is resolved from the session transcript by scanning for `/model` and `/effort` commands, with a `settings.json` fallback shown with `?` suffix. After session resume, effort resets to the `?` fallback until `/effort` or `/model` is used.
 - **No session fork support** — forked sessions share a transcript file. The prompt cache countdown and effort detection may be inaccurate because messages from all forks are interleaved.

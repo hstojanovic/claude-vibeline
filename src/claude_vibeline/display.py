@@ -192,23 +192,16 @@ def format_cache_countdown(secs_left: int) -> str:
     return f'{secs_left}s'
 
 
-def format_cache_expiry(secs_left: int) -> str:
-    """
-    Format cache expiration as local clock time (e.g. "14:35").
-    """
-    expiry = datetime.now(tz=None) + timedelta(seconds=secs_left)  # noqa: DTZ005 — local clock time intentional
-    return expiry.strftime('%H:%M')
-
-
-def cache_section(secs_left: int, *, gap: bool, live: bool = False) -> str:
+def cache_section(secs_left: int, *, gap: bool) -> str:
     gap_icon = f'{RED}\u21bb{RESET} ' if gap else ''
+    display = format_cache_countdown(max(0, secs_left))
     if secs_left <= 0:
-        display = '0s' if live else format_cache_expiry(secs_left)
-        return f'{LABEL}cache{RESET} {gap_icon}{RED}\u2717 {display}{RESET}'
-    display = format_cache_countdown(secs_left) if live else format_cache_expiry(secs_left)
-    if secs_left <= CACHE_LOW_THRESHOLD:
-        return f'{LABEL}cache{RESET} {gap_icon}{YELLOW}\u26a0 {display}{RESET}'
-    return f'{LABEL}cache{RESET} {gap_icon}{GREEN}\u25f7 {display}{RESET}'
+        color, icon = RED, '\u2717'
+    elif secs_left <= CACHE_LOW_THRESHOLD:
+        color, icon = YELLOW, '\u26a0'
+    else:
+        color, icon = GREEN, '\u25f7'
+    return f'{LABEL}cache{RESET} {gap_icon}{color}{icon} {display}{RESET}'
 
 
 def visible_len(s: str) -> int:
