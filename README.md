@@ -11,7 +11,7 @@
 A custom statusline for [Claude Code](https://claude.com/product/claude-code) that shows session details, prompt cache status, and rate limits — designed for Pro, Max, and Team users.
 
 ```
-my-project │ Opus 4.6 (high) │ cache ◷ 14:35 │ ctx 1M [###-----] 42% │
+my-project │ Opus 4.7 (xhigh) │ cache ◷ 14:35 │ ctx 1M [###-----] 42% │
 sess [##------] 19% 3h12m │ week [--------] 3% 5d20h
 ```
 
@@ -97,7 +97,7 @@ Example with all API sections enabled:
 ```
 
 ```
-my-project │ Opus 4.6 (high) │ cache ◷ 14:35 │ ctx 1M [###-----] 42% │
+my-project │ Opus 4.7 (xhigh) │ cache ◷ 14:35 │ ctx 1M [###-----] 42% │
 sess [##------] 19% 3h12m │ week [--------] 3% 5d20h │
 opus [#-------] 10% 5d20h │ sonnet [--------] 2% 5d20h │
 extra 1.23/20$ 7d0h

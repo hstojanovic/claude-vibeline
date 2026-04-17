@@ -162,6 +162,7 @@ def api_usage_parts(args: Args, api_usage: UsageData, stale_ts: float | None = N
 
 
 SUPPORTED_EFFORTS: dict[str, set[str]] = {
+    'opus 4.7': {'low', 'medium', 'high', 'xhigh', 'max'},
     'opus 4.6': {'low', 'medium', 'high', 'max'},
     'sonnet 4.6': {'low', 'medium', 'high'},
 }
@@ -172,8 +173,11 @@ def model_section(model_name: str, effort: str) -> str:
     supported = next((v for k, v in SUPPORTED_EFFORTS.items() if name.startswith(k)), None)
     if supported is None:
         return f'{ORANGE}{model_name}{RESET}'
-    if effort.rstrip('?') in supported:
+    bare = effort.rstrip('?')
+    if bare in supported:
         return f'{ORANGE}{model_name}{RESET} {GOLD}({effort}){RESET}'
+    if bare == 'xhigh' and 'high' in supported:
+        return f'{ORANGE}{model_name}{RESET} {GOLD}(high?){RESET}'
     return f'{ORANGE}{model_name}{RESET} {GOLD}(medium?){RESET}'
 
 

@@ -463,6 +463,23 @@ class TestModelSection:
         result = model_section('Opus 4.6', 'max')
         assert '(max)' in result
 
+    def test_opus_4_7_xhigh(self) -> None:
+        result = model_section('Opus 4.7', 'xhigh')
+        assert 'Opus 4.7' in result
+        assert '(xhigh)' in result
+
+    def test_opus_4_7_max(self) -> None:
+        result = model_section('Opus 4.7', 'max')
+        assert '(max)' in result
+
+    def test_opus_4_6_xhigh_falls_back_to_high(self) -> None:
+        result = model_section('Opus 4.6', 'xhigh?')
+        assert '(high?)' in result
+
+    def test_sonnet_4_6_xhigh_falls_back_to_high(self) -> None:
+        result = model_section('Sonnet 4.6', 'xhigh?')
+        assert '(high?)' in result
+
     def test_haiku_skips_effort(self) -> None:
         result = model_section('Haiku 4.5', 'high')
         assert 'Haiku' in result

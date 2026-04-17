@@ -13,7 +13,7 @@ from claude_vibeline.constants import ANSI_RE, TAIL_CHUNK
 if TYPE_CHECKING:
     from claude_vibeline.schema import SessionCache
 
-EFFORT_LEVELS = r'low|medium|high|max'
+EFFORT_LEVELS = r'low|medium|high|xhigh|max'
 MODEL_EFFORT_RE = re.compile(rf'with ({EFFORT_LEVELS}) effort')
 EFFORT_COMMAND_RE = re.compile(rf'Set effort level to ({EFFORT_LEVELS})')
 SET_MODEL_PREFIX = 'Set model to'

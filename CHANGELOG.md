@@ -17,6 +17,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Change cache icon from `✓` to `◷` and default display from live countdown (`✓ 4m`) to absolute clock time (`◷ 14:35` upcoming, `✗ 14:30` past); live countdown is opt-in via `--cache-updater`
 - Change cache gap indicator from `!↻` to `↻`
 
+### Added
+
+- Add Opus 4.7 support with `xhigh` effort level; when settings specify `xhigh` on a model that doesn't support it (e.g. Opus 4.6, Sonnet 4.6), the fallback shown is `high?` instead of `medium?`
+
 ### Fixed
 
 - Fix effort level showing on legacy models (Opus 4.5, Sonnet 4.5, etc.) that don't support adaptive thinking
