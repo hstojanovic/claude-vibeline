@@ -1,6 +1,6 @@
 __pycache__/
+*.local.*
 *.pyc
-/.claude/*.local.*
 /.coverage
 /coverage.xml
 /uv.lock
