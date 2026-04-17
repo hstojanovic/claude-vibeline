@@ -19,6 +19,7 @@ from claude_vibeline.constants import (
     SEP,
     YELLOW,
 )
+from claude_vibeline.effort import supported_efforts_for
 
 if TYPE_CHECKING:
     from claude_vibeline.args import Args
@@ -161,16 +162,8 @@ def api_usage_parts(args: Args, api_usage: UsageData, stale_ts: float | None = N
     return parts
 
 
-SUPPORTED_EFFORTS: dict[str, set[str]] = {
-    'opus 4.7': {'low', 'medium', 'high', 'xhigh', 'max'},
-    'opus 4.6': {'low', 'medium', 'high', 'max'},
-    'sonnet 4.6': {'low', 'medium', 'high'},
-}
-
-
 def model_section(model_name: str, effort: str) -> str:
-    name = model_name.lower()
-    supported = next((v for k, v in SUPPORTED_EFFORTS.items() if name.startswith(k)), None)
+    supported = supported_efforts_for(model_name)
     if supported is None:
         return f'{ORANGE}{model_name}{RESET}'
     bare = effort.rstrip('?')

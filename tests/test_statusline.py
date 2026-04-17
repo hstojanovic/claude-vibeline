@@ -33,7 +33,10 @@ STDIN_DATA = {
 
 
 def run_main(
-    stdin_data: StdinData | dict[str, Any] | None = None, argv: list[str] | None = None, tmp_path: Path | None = None
+    stdin_data: StdinData | dict[str, Any] | None = None,
+    argv: list[str] | None = None,
+    tmp_path: Path | None = None,
+    settings_effort: str = 'medium?',
 ) -> str:
     """
     Run main() with real effort resolution (no mocking resolve_effort).
@@ -56,7 +59,7 @@ def run_main(
         mock.patch.object(_mod.sys, 'stdin', fake_stdin),
         mock.patch.object(_mod.sys, 'stdout', fake_stdout),
         mock.patch('claude_vibeline.effort.session_cache_dir', return_value=cache_dir),
-        mock.patch('claude_vibeline.effort.read_settings_effort', return_value='medium?'),
+        mock.patch('claude_vibeline.effort.read_settings_effort', return_value=settings_effort),
     ):
         main()
         _mod.sys.stdout.flush()
@@ -188,6 +191,19 @@ class TestMain:
         data = {**STDIN_DATA, 'transcript_path': transcript_path, 'session_id': session_id}
         output = run_main(stdin_data=data, tmp_path=tmp_path)
         assert '(max)' in output
+
+    def test_max_transcript_on_sonnet_falls_back_to_settings(self, tmp_path: Path) -> None:
+        transcript_path, session_id = _effort_transcript('max', tmp_path)
+        data = {
+            **STDIN_DATA,
+            'transcript_path': transcript_path,
+            'session_id': session_id,
+            'model': {'display_name': 'Sonnet 4.6'},
+        }
+        output = run_main(stdin_data=data, tmp_path=tmp_path, settings_effort='high?')
+        assert '(high?)' in output
+        assert '(max)' not in output
+        assert '(medium?)' not in output
 
     def test_haiku_no_effort(self) -> None:
         data = {**STDIN_DATA, 'model': {'display_name': 'Haiku 4.5'}}

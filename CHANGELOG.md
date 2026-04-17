@@ -25,6 +25,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - Fix effort level showing on legacy models (Opus 4.5, Sonnet 4.5, etc.) that don't support adaptive thinking
 - Fix orphaned temp files left behind during debug log rotation
+- Fix effort display when the transcript's last effort isn't supported on the current model (e.g. switching Opus with `max` effort back to Sonnet): now falls through to the `settings.json` value with `?` suffix instead of defaulting to `(medium?)`
 
 ## [1.1.0] - 2026-03-17
 

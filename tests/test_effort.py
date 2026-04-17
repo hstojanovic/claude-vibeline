@@ -12,9 +12,11 @@ from claude_vibeline.effort import (
     parse_effort_from_line,
     read_session_cache,
     read_settings_effort,
+    refine_effort_for_model,
     resolve_effort,
     scan_transcript_effort,
     session_cache_dir,
+    supported_efforts_for,
     write_session_cache,
 )
 
@@ -449,3 +451,39 @@ class TestCleanupSessionCache:
 
     def test_oserror_silenced(self) -> None:
         cleanup_session_cache(Path('/nonexistent/path'))
+
+
+class TestSupportedEffortsFor:
+    def test_opus_4_7(self) -> None:
+        assert supported_efforts_for('Opus 4.7') == {'low', 'medium', 'high', 'xhigh', 'max'}
+
+    def test_opus_4_7_with_suffix(self) -> None:
+        assert supported_efforts_for('Opus 4.7 (1M context)') == {'low', 'medium', 'high', 'xhigh', 'max'}
+
+    def test_sonnet_4_6(self) -> None:
+        assert supported_efforts_for('Sonnet 4.6') == {'low', 'medium', 'high'}
+
+    def test_unknown(self) -> None:
+        assert supported_efforts_for('Haiku 4.5') is None
+
+
+class TestRefineEffortForModel:
+    def test_supported_transcript_effort_passes_through(self) -> None:
+        assert refine_effort_for_model('high', 'Sonnet 4.6') == 'high'
+
+    def test_supported_settings_effort_passes_through(self) -> None:
+        assert refine_effort_for_model('high?', 'Sonnet 4.6') == 'high?'
+
+    def test_unknown_model_passes_through(self) -> None:
+        assert refine_effort_for_model('max', 'Haiku 4.5') == 'max'
+
+    def test_unsupported_transcript_falls_back_to_settings(self) -> None:
+        with mock.patch('claude_vibeline.effort.read_settings_effort', return_value='xhigh?'):
+            assert refine_effort_for_model('max', 'Sonnet 4.6') == 'xhigh?'
+
+    def test_unsupported_settings_passes_through_for_downstream_degrade(self) -> None:
+        assert refine_effort_for_model('xhigh?', 'Sonnet 4.6') == 'xhigh?'
+
+    def test_xhigh_transcript_on_unsupporting_model_falls_back(self) -> None:
+        with mock.patch('claude_vibeline.effort.read_settings_effort', return_value='medium?'):
+            assert refine_effort_for_model('xhigh', 'Sonnet 4.6') == 'medium?'

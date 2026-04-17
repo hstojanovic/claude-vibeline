@@ -21,6 +21,17 @@ SET_EFFORT_PREFIX = 'Set effort level to'
 EFFORT_AUTO_PREFIX = 'Effort level set to auto'
 CACHE_MAX_AGE = 30 * 86400  # 30 days
 
+SUPPORTED_EFFORTS: dict[str, set[str]] = {
+    'opus 4.7': {'low', 'medium', 'high', 'xhigh', 'max'},
+    'opus 4.6': {'low', 'medium', 'high', 'max'},
+    'sonnet 4.6': {'low', 'medium', 'high'},
+}
+
+
+def supported_efforts_for(model_name: str) -> set[str] | None:
+    name = model_name.lower()
+    return next((v for k, v in SUPPORTED_EFFORTS.items() if name.startswith(k)), None)
+
 
 def read_settings_effort() -> str:
     """
@@ -202,3 +213,16 @@ def resolve_effort(transcript_path: str | None, session_id: str | None) -> str:
     if session_id is not None:
         write_session_cache(session_id, {'effort': fallback})
     return fallback
+
+
+def refine_effort_for_model(effort: str, model_name: str) -> str:
+    """
+    Fall back to settings if the transcript effort isn't supported on this model.
+
+    Unknown models and already-fallback efforts pass through unchanged so
+    model_section can apply its own xhigh → high degrade.
+    """
+    supported = supported_efforts_for(model_name)
+    if supported is None or effort.rstrip('?') in supported or effort.endswith('?'):
+        return effort
+    return read_settings_effort()

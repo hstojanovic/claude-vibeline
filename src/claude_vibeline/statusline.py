@@ -17,7 +17,7 @@ from claude_vibeline.display import (
     stdin_usage_parts,
     wrap_parts,
 )
-from claude_vibeline.effort import resolve_effort
+from claude_vibeline.effort import refine_effort_for_model, resolve_effort
 from claude_vibeline.prompt_cache import prompt_cache_section
 from claude_vibeline.refresh import maybe_spawn_cache_updater
 from claude_vibeline.usage import fetch_usage
@@ -55,6 +55,7 @@ def main() -> None:
     model_name = data.get('model', {}).get('display_name') or 'Unknown'
     used_perc = round(data.get('context_window', {}).get('used_percentage', 0))
     effort = resolve_effort(data.get('transcript_path'), data.get('session_id'))
+    effort = refine_effort_for_model(effort, model_name)
 
     parts: list[str] = []
 
