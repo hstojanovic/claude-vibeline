@@ -20,8 +20,11 @@ SEP = f'{NBSP}{DIM}\u2502{RESET} '
 ANSI_RE = re.compile(r'\033\[[0-9;]*m')
 
 USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
+PYPI_URL = 'https://pypi.org/pypi/claude-vibeline/json'
 CACHE_TTL_SECONDS = 60
 PROMPT_CACHE_TTL = 300  # 5-minute prompt cache TTL
 CACHE_LOW_THRESHOLD = 120  # 2 minutes — switch from green to yellow
+UPDATE_CHECK_INTERVAL = 86400  # 1 day
+UPDATE_FETCH_TIMEOUT = 3
 DEBUG_LOG_MAX_BYTES = 1_000_000
 TAIL_CHUNK = 16384

@@ -1,4 +1,6 @@
+import contextlib
 import dataclasses
+import io
 from typing import Annotated
 
 import cappa
@@ -41,6 +43,7 @@ class Args:
     extra: Annotated[
         bool, cappa.Arg(long='--extra', help='show extra usage spend (requires --usage-api)', show_default=False)
     ] = False
+    update: Annotated[bool, cappa.Arg(long='--no-update', help='hide update notification', show_default=False)] = True
     debug: Annotated[bool, cappa.Arg(long='--debug', help='log each output to debug file', show_default=False)] = False
 
     version: Annotated[
@@ -54,3 +57,23 @@ class Args:
             group=cappa.Group(name='Help', section=2),
         ),
     ] = app_version
+
+
+def parse_args() -> tuple[Args, str | None]:
+    """
+    Parse args, returning (args, error_message).
+
+    On parse failure (unknown flag, bad value, etc.) returns default Args and
+    the error message so the caller can surface it in the statusline message
+    slot. --help and --version still exit normally.
+    """
+    err_buf = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err_buf):
+            return cappa.parse(Args, completion=False), None
+    except cappa.HelpExit:
+        raise
+    except cappa.Exit as e:
+        if e.code == 0:
+            raise
+        return Args(), str(e.message) if e.message else 'parse error'

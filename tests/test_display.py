@@ -14,12 +14,14 @@ from claude_vibeline.display import (
     format_cache_countdown,
     format_context_size,
     format_countdown,
+    format_error_message,
     is_past,
     model_section,
     stdin_section,
     stdin_usage_parts,
     usage_section,
     visible_len,
+    wrap_message,
     wrap_parts,
 )
 
@@ -328,6 +330,38 @@ class TestWrapParts:
         parts = ['a' * 100]
         result = wrap_parts(parts, 50)
         assert '\n' not in result
+
+
+class TestWrapMessage:
+    def test_short_fits_on_one_line(self) -> None:
+        assert wrap_message('hello world', 40) == 'hello world'
+
+    def test_wraps_at_word_boundary(self) -> None:
+        result = wrap_message('aaa bbb ccc ddd', 8)
+        assert result == 'aaa bbb\nccc ddd'
+
+    def test_visible_length_ignores_ansi(self) -> None:
+        msg = f'{ORANGE}{"a" * 10}{RESET} {PERC}{"b" * 10}{RESET}'
+        result = wrap_message(msg, 15)
+        assert '\n' in result
+        for line in result.split('\n'):
+            assert ANSI_RE.sub('', line).strip()
+
+    def test_word_longer_than_columns(self) -> None:
+        # Overlong words are emitted on their own line rather than split
+        result = wrap_message('aaa verylongword bbb', 5)
+        lines = result.split('\n')
+        assert 'verylongword' in lines
+
+    def test_empty_string(self) -> None:
+        assert not wrap_message('', 40)
+
+
+class TestFormatErrorMessage:
+    def test_contains_program_name_and_message(self) -> None:
+        msg = format_error_message('something broke')
+        assert 'claude-vibeline' in msg
+        assert 'something broke' in msg
 
 
 class TestWrapPartsAnsi:

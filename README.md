@@ -84,6 +84,7 @@ Add to `~/.claude/settings.json`:
 | `--opus` | Show weekly Opus rate limit (requires `--usage-api`) |
 | `--sonnet` | Show weekly Sonnet rate limit (requires `--usage-api`) |
 | `--extra` | Show extra usage spend (requires `--usage-api`) |
+| `--no-update` | Hide update notification |
 | `--debug` | Log each statusline output to debug file |
 
 Example with all API sections enabled:
@@ -141,9 +142,31 @@ Claude Vibeline caches per-session data to avoid redundant transcript parsing on
 
 Stale session files (older than 30 days) are cleaned up whenever a new session writes its first cache entry.
 
+## Update notifications
+
+When a newer version is published on PyPI, a message line appears below the statusline:
+
+```
+my-project │ Opus 4.7 (xhigh) │ ctx 1M [###-----] 42%
+update available: 2.0.0 → 2.0.1 · uv tool upgrade claude-vibeline
+```
+
+PyPI is queried on the first render of a new session, and at most once per 24 hours overall. The cached `latest` version is reused on every render in between. Disable with `--no-update`.
+
+## Error messages
+
+CLI parse errors (unknown flag, invalid value, missing argument) and unexpected render failures are shown as a message line below the statusline, prefixed with the program name so it's unambiguous where the error comes from:
+
+```
+my-project │ Opus 4.7 (xhigh) │ ctx 1M [###-----] 42%
+claude-vibeline: Unrecognized arguments: --bogus
+```
+
+The statusline still renders with defaults, so a bad flag no longer silences the output entirely. Error messages are always shown — there is no opt-out.
+
 ## Local data
 
-All locally cached data (usage responses, session state) is version-stamped and automatically invalidated on upgrade.
+All locally cached data (usage responses, session state, update check) is version-stamped and automatically invalidated on upgrade.
 
 ## Limitations
 

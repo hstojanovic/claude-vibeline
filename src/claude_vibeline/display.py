@@ -226,3 +226,33 @@ def wrap_parts(parts: list[str], columns: int) -> str:
     if line_parts:
         lines.append(SEP.join(line_parts))
     return '\n'.join(lines)
+
+
+def wrap_message(text: str, columns: int) -> str:
+    """
+    Word-wrap a single string to `columns` width.
+
+    Uses visible (ANSI-stripped) length, breaks at spaces. Words longer than
+    `columns` are emitted on their own line.
+    """
+    words = text.split(' ')
+    lines: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for word in words:
+        wlen = visible_len(word)
+        sep = 1 if current else 0
+        if current and current_len + sep + wlen > columns:
+            lines.append(' '.join(current))
+            current = [word]
+            current_len = wlen
+        else:
+            current.append(word)
+            current_len += sep + wlen
+    if current:
+        lines.append(' '.join(current))
+    return '\n'.join(lines)
+
+
+def format_error_message(msg: str) -> str:
+    return f'{LABEL}claude-vibeline{RESET}{DIM}:{RESET} {RED}{msg}{RESET}'

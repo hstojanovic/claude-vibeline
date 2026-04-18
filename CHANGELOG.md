@@ -8,6 +8,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- Add update notifications: when a newer version is published to PyPI, a message line below the statusline shows `update {current}→{latest} uv tool upgrade claude-vibeline`. PyPI is queried on the first render of a new session and at most once per 24 hours; the cached `latest` version is reused on every render in between. Opt out with `--no-update`
+- Add an error message line below the statusline for CLI parse errors (unknown flag, invalid value, etc.) and unexpected render failures. The statusline still renders with defaults so a bad flag no longer silences the output entirely. Error messages are not opt-outable
+
 ### Changed
 
 - Change cache section to always render as a live countdown (`◷ 4m`, `⚠ 47s`, `✗ 0s`); absolute clock-time display has been dropped
@@ -20,6 +25,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Fixed
 
 - Remove leftover `refresh.lock` from the removed cache updater on the first session cache write of a new session
+- Treat `context_window.used_percentage: null` as zero. Claude Code sends `null` early in a new session before the first API call, which previously raised `TypeError` in `round()` and suppressed the statusline on the first render of every new session
 
 ## [2.0.0] - 2026-04-17
 

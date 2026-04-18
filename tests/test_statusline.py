@@ -11,7 +11,7 @@ from unittest import mock
 from freezegun import freeze_time
 
 from claude_vibeline.constants import ANSI_RE, EMPTY, FILL
-from claude_vibeline.statusline import main
+from claude_vibeline.statusline import is_new_session, main
 
 if TYPE_CHECKING:
     from claude_vibeline.schema import StdinData, UsageData
@@ -59,6 +59,7 @@ def run_main(
         mock.patch.object(_mod.sys, 'stdin', fake_stdin),
         mock.patch.object(_mod.sys, 'stdout', fake_stdout),
         mock.patch('claude_vibeline.effort.session_cache_dir', return_value=cache_dir),
+        mock.patch('claude_vibeline.statusline.session_cache_dir', return_value=cache_dir),
         mock.patch('claude_vibeline.effort.read_settings_effort', return_value=settings_effort),
     ):
         main()
@@ -141,6 +142,20 @@ class TestMain:
         assert '200k' not in output
         assert '1M' not in output
         assert '42%' in output
+
+    def test_used_percentage_null_renders_as_zero(self) -> None:
+        # Claude Code sends null early in a new session before the first API call
+        data = {**STDIN_DATA, 'context_window': {'used_percentage': None, 'context_window_size': 200_000}}
+        output = run_main(stdin_data=data)
+        assert 'error' not in output
+        assert '0%' in output
+        assert '200k' in output
+
+    def test_used_percentage_missing_renders_as_zero(self) -> None:
+        data = {**STDIN_DATA, 'context_window': {'context_window_size': 200_000}}
+        output = run_main(stdin_data=data)
+        assert 'error' not in output
+        assert '0%' in output
 
     def test_no_context_flag(self) -> None:
         output = run_main(argv=['claude-vibeline', '--no-context'])
@@ -307,6 +322,74 @@ class TestMain:
         assert '?' not in ANSI_RE.sub('', output).split('(low)')[1].split(')')[0]
         cached = json.loads((tmp_path / 'sessions' / f'{session_id}.json').read_text())
         assert cached['effort'] == 'low'
+
+
+class TestMessageLine:
+    def test_unknown_flag_shows_error_message(self, tmp_path: Path) -> None:
+        output = run_main(argv=['claude-vibeline', '--bogus'], tmp_path=tmp_path)
+        # Statusline still renders despite the unknown flag
+        assert 'Opus' in output
+        # Plus an error message line below, prefixed with the program name
+        assert 'claude-vibeline' in output
+        assert 'bogus' in output.lower()
+        assert '\n' in output
+
+    def test_update_message_rendered_when_newer(self, tmp_path: Path) -> None:
+        with mock.patch('claude_vibeline.statusline.check_for_update', return_value='99.0.0'):
+            output = run_main(tmp_path=tmp_path)
+        assert 'Opus' in output
+        assert 'update' in output
+        assert '99.0.0' in output
+
+    def test_no_update_flag_suppresses_update_message(self, tmp_path: Path) -> None:
+        with mock.patch('claude_vibeline.statusline.check_for_update', return_value='99.0.0') as check:
+            output = run_main(argv=['claude-vibeline', '--no-update'], tmp_path=tmp_path)
+        check.assert_not_called()
+        assert 'update' not in output
+
+    def test_error_beats_update(self, tmp_path: Path) -> None:
+        # Even with update available, parse error takes priority
+        with mock.patch('claude_vibeline.statusline.check_for_update', return_value='99.0.0'):
+            output = run_main(argv=['claude-vibeline', '--bogus'], tmp_path=tmp_path)
+        assert 'claude-vibeline' in output
+        assert 'bogus' in output.lower()
+        assert '99.0.0' not in output
+
+    def test_update_check_failure_does_not_break_statusline(self, tmp_path: Path) -> None:
+        with mock.patch('claude_vibeline.statusline.check_for_update', side_effect=RuntimeError('boom')):
+            output = run_main(tmp_path=tmp_path)
+        assert 'Opus' in output
+        assert 'update' not in output
+        assert 'claude-vibeline' not in output  # update failures are silent
+
+    def test_render_failure_produces_error_message(self, tmp_path: Path) -> None:
+        with mock.patch('claude_vibeline.statusline.render', side_effect=RuntimeError('boom')):
+            output = run_main(tmp_path=tmp_path)
+        assert 'claude-vibeline' in output
+        assert 'RuntimeError' in output
+        assert 'boom' in output
+
+    def test_new_session_flag_passed_to_update_check(self, tmp_path: Path) -> None:
+        data = {**STDIN_DATA, 'session_id': 'never-seen'}
+        with mock.patch('claude_vibeline.statusline.check_for_update', return_value=None) as check:
+            run_main(stdin_data=data, tmp_path=tmp_path)
+        check.assert_called_once_with(is_new_session=True)
+
+    def test_existing_session_is_not_new(self, tmp_path: Path) -> None:
+        cache_dir = tmp_path / 'sessions'
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / 'seen-before.json').write_text('{}')
+        data = {**STDIN_DATA, 'session_id': 'seen-before'}
+        with mock.patch('claude_vibeline.statusline.check_for_update', return_value=None) as check:
+            run_main(stdin_data=data, tmp_path=tmp_path)
+        check.assert_called_once_with(is_new_session=False)
+
+    def test_is_new_session_none_id(self) -> None:
+        assert is_new_session(None) is False
+
+    def test_is_new_session_oserror_is_false(self) -> None:
+        with mock.patch('claude_vibeline.statusline.session_cache_dir', side_effect=OSError):
+            assert is_new_session('some-session') is False
 
 
 class TestProjectNameEdgeCases:

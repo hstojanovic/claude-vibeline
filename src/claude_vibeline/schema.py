@@ -50,7 +50,8 @@ class Model(TypedDict, total=False):
 
 
 class ContextWindow(TypedDict, total=False):
-    used_percentage: float
+    # used_percentage is null early in a session, before the first API call.
+    used_percentage: float | None
     context_window_size: int
 
 
@@ -67,3 +68,8 @@ class SessionCache(TypedDict, total=False):
     effort: str
     effort_ts: str
     last_user_ts: float
+
+
+class UpdateCache(TypedDict, total=False):
+    latest: str
+    checked_ts: float
