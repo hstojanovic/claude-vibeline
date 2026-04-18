@@ -100,6 +100,7 @@ def write_session_cache(session_id: str, data: SessionCache) -> None:
         tmp.replace(cache_file)
         if is_new:
             cleanup_session_cache(cache_dir)
+            (cache_dir.parent / 'refresh.lock').unlink(missing_ok=True)
     except OSError:
         pass
 

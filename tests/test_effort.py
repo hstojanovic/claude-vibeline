@@ -454,6 +454,15 @@ class TestSessionCache:
             write_session_cache('sess-1', {'effort': 'low'})
         assert stale.exists()
 
+    def test_write_new_session_removes_legacy_refresh_lock(self, tmp_path: Path) -> None:
+        sessions_dir = tmp_path / 'sessions'
+        sessions_dir.mkdir()
+        legacy_lock = tmp_path / 'refresh.lock'
+        legacy_lock.write_text('{"token": "old"}')
+        with mock.patch('claude_vibeline.effort.session_cache_dir', return_value=sessions_dir):
+            write_session_cache('sess-1', {'effort': 'high'})
+        assert not legacy_lock.exists()
+
 
 class TestCleanupSessionCache:
     def test_removes_old_files(self, tmp_path: Path) -> None:

@@ -17,6 +17,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - **Breaking:** Remove `--cache-updater` flag and the background process that toggled `settings.json` to force statusline re-renders; Claude Code now exposes `refreshIntervalSeconds` in the `statusLine` config for native refreshes
 
+### Fixed
+
+- Remove leftover `refresh.lock` from the removed cache updater on the first session cache write of a new session
+
 ## [2.0.0] - 2026-04-17
 
 ### Changed
