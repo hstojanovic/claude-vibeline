@@ -8,13 +8,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- Change cache section to always render as a live countdown (`◷ 4m`, `⚠ 47s`, `✗ 0s`); absolute clock-time display has been dropped
+- Skip session cache writes when the last user timestamp is unchanged, and defer stale-file cleanup to new-session writes — avoids redundant I/O when Claude Code refreshes the statusline on an interval
+
 ### Removed
 
 - **Breaking:** Remove `--cache-updater` flag and the background process that toggled `settings.json` to force statusline re-renders; Claude Code now exposes `refreshIntervalSeconds` in the `statusLine` config for native refreshes
-
-### Changed
-
-- Cache section now always renders as a live countdown (`◷ 4m`, `⚠ 47s`, `✗ 0s`); absolute clock-time display has been dropped
 
 ## [2.0.0] - 2026-04-17
 

@@ -437,6 +437,23 @@ class TestSessionCache:
             assert cached['effort'] == 'high'
             assert cached['last_user_ts'] == 1000.0  # noqa: RUF069 - exact roundtrip via JSON
 
+    def test_write_new_file_triggers_cleanup(self, tmp_path: Path) -> None:
+        stale = tmp_path / 'stale.json'
+        stale.write_text('{}')
+        os.utime(stale, (0, 0))
+        with mock.patch('claude_vibeline.effort.session_cache_dir', return_value=tmp_path):
+            write_session_cache('sess-1', {'effort': 'high'})
+        assert not stale.exists()
+
+    def test_write_existing_file_skips_cleanup(self, tmp_path: Path) -> None:
+        with mock.patch('claude_vibeline.effort.session_cache_dir', return_value=tmp_path):
+            write_session_cache('sess-1', {'effort': 'high'})
+            stale = tmp_path / 'stale.json'
+            stale.write_text('{}')
+            os.utime(stale, (0, 0))
+            write_session_cache('sess-1', {'effort': 'low'})
+        assert stale.exists()
+
 
 class TestCleanupSessionCache:
     def test_removes_old_files(self, tmp_path: Path) -> None:

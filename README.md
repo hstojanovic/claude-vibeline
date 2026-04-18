@@ -139,7 +139,7 @@ Claude Vibeline caches per-session data to avoid redundant transcript parsing on
 - **Effort level** — the resolved effort and the timestamp of the latest transcript entry processed, so subsequent invocations only scan new entries instead of re-reading the entire transcript.
 - **Last user message timestamp** — used by the prompt cache countdown as a fallback when the transcript cannot be read.
 
-Stale session files (older than 30 days) are cleaned up on every write.
+Stale session files (older than 30 days) are cleaned up whenever a new session writes its first cache entry.
 
 ## Local data
 

@@ -92,12 +92,14 @@ def write_session_cache(session_id: str, data: SessionCache) -> None:
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_file = cache_dir / f'{session_id}.json'
+        is_new = not cache_file.exists()
         existing = read_session_cache(session_id)
         merged = {**existing, **data, '_v': app_version}
         tmp = cache_file.with_suffix(f'.{os.getpid()}.tmp')
         tmp.write_text(json.dumps(merged))
         tmp.replace(cache_file)
-        cleanup_session_cache(cache_dir)
+        if is_new:
+            cleanup_session_cache(cache_dir)
     except OSError:
         pass
 
