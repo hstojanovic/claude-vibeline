@@ -8,15 +8,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
-### Added
-
-- Add update notifications: when a newer version is published to PyPI, a message line below the statusline shows `update {current}→{latest} uv tool upgrade claude-vibeline`. PyPI is queried on the first render of a new session and at most once per 24 hours; the cached `latest` version is reused on every render in between. Opt out with `--no-update`
-- Add an error message line below the statusline for CLI parse errors (unknown flag, invalid value, etc.) and unexpected render failures. The statusline still renders with defaults so a bad flag no longer silences the output entirely. Error messages are not opt-outable
+## [3.0.0] - 2026-04-20
 
 ### Changed
 
 - Change cache section to always render as a live countdown (`◷ 4m`, `⚠ 47s`, `✗ 0s`); absolute clock-time display has been dropped
 - Skip session cache writes when the last user timestamp is unchanged, and defer stale-file cleanup to new-session writes — avoids redundant I/O when Claude Code refreshes the statusline on an interval
+
+### Added
+
+- Add update notifications: when a newer version is published to PyPI, a message line below the statusline shows `update {current}→{latest} uv tool upgrade claude-vibeline`. PyPI is queried on the first render of a new session and at most once per 24 hours; the cached `latest` version is reused on every render in between. Opt out with `--no-update`
+- Add an error message line below the statusline for CLI parse errors (unknown flag, invalid value, etc.) and unexpected render failures. The statusline still renders with defaults so a bad flag no longer silences the output entirely. Error messages are not opt-outable
 
 ### Removed
 
@@ -92,6 +94,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Add `--currency` option for extra usage currency symbol (default: `€`)
 - Add `--debug` flag to log each statusline output to a platform-specific log file
 
-[Unreleased]: https://github.com/hstojanovic/claude-vibeline/compare/1.1.0...HEAD
+[Unreleased]: https://github.com/hstojanovic/claude-vibeline/compare/3.0.0...HEAD
+[3.0.0]: https://github.com/hstojanovic/claude-vibeline/compare/2.0.0...3.0.0
+[2.0.0]: https://github.com/hstojanovic/claude-vibeline/compare/1.1.0...2.0.0
 [1.1.0]: https://github.com/hstojanovic/claude-vibeline/compare/1.0.0...1.1.0
 [1.0.0]: https://github.com/hstojanovic/claude-vibeline/releases/tag/1.0.0
