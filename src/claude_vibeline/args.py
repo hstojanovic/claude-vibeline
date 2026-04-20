@@ -54,6 +54,7 @@ class Args:
             long='--version',
             action=cappa.ArgAction.version,
             help='Show version and exit.',
+            show_default=False,
             group=cappa.Group(name='Help', section=2),
         ),
     ] = app_version
