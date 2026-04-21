@@ -35,14 +35,17 @@ def supported_efforts_for(model_name: str) -> set[str] | None:
 
 def read_settings_effort() -> str:
     """
-    Read effort from settings.json, suffixed with '?' to indicate uncertainty.
+    Read effort from settings.json.
+
+    Returns the plain value; callers append '?' when the value is a best-guess
+    fallback in a genuinely uncertain context.
     """
     try:
         settings = Path('~/.claude/settings.json').expanduser()
         effort = json.loads(settings.read_text()).get('effortLevel', 'medium')
     except OSError, json.JSONDecodeError:
         effort = 'medium'
-    return f'{effort}?'
+    return effort
 
 
 def parse_effort_from_line(visible: str) -> str | None:
@@ -203,7 +206,8 @@ def resolve_effort(transcript_path: str | None, session_id: str | None) -> str:
     if session_id is not None and latest_ts:
         update: SessionCache = {'effort_ts': latest_ts}
         if saw_synthetic:
-            fallback = read_settings_effort()
+            # Resumed session: settings value is a best guess; mark uncertain.
+            fallback = f'{read_settings_effort()}?'
             write_session_cache(session_id, {**update, 'effort': fallback})
             return fallback
         write_session_cache(session_id, update)
@@ -228,4 +232,4 @@ def refine_effort_for_model(effort: str, model_name: str) -> str:
     supported = supported_efforts_for(model_name)
     if supported is None or effort.rstrip('?') in supported or effort.endswith('?'):
         return effort
-    return read_settings_effort()
+    return f'{read_settings_effort()}?'

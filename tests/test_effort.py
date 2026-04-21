@@ -294,15 +294,15 @@ class TestResolveEffort:
     def test_no_effort_no_cache_falls_back_to_settings(self, tmp_path: Path) -> None:
         with (
             mock.patch('claude_vibeline.effort.session_cache_dir', return_value=tmp_path),
-            mock.patch('claude_vibeline.effort.read_settings_effort', return_value='medium?'),
+            mock.patch('claude_vibeline.effort.read_settings_effort', return_value='medium'),
         ):
             result = resolve_effort(None, 'sess-new')
-        assert result == 'medium?'
+        assert result == 'medium'
 
     def test_no_session_id_falls_back_to_settings(self) -> None:
-        with mock.patch('claude_vibeline.effort.read_settings_effort', return_value='medium?'):
+        with mock.patch('claude_vibeline.effort.read_settings_effort', return_value='medium'):
             result = resolve_effort(None, None)
-        assert result == 'medium?'
+        assert result == 'medium'
 
     def test_scan_beats_cached_effort(self, tmp_path: Path) -> None:
         cache_dir = tmp_path / 'cache'
@@ -361,7 +361,7 @@ class TestResolveEffort:
         transcript.write_text(synthetic + '\n')
         with (
             mock.patch('claude_vibeline.effort.session_cache_dir', return_value=cache_dir),
-            mock.patch('claude_vibeline.effort.read_settings_effort', return_value='medium?'),
+            mock.patch('claude_vibeline.effort.read_settings_effort', return_value='medium'),
         ):
             result = resolve_effort(str(transcript), 'sess-1')
         assert result == 'medium?'
@@ -372,23 +372,23 @@ class TestReadSettingsEffort:
         settings = tmp_path / 'settings.json'
         settings.write_text(json.dumps({'effortLevel': 'low'}))
         with mock.patch.object(Path, 'expanduser', return_value=settings):
-            assert read_settings_effort() == 'low?'
+            assert read_settings_effort() == 'low'
 
     def test_missing_file(self, tmp_path: Path) -> None:
         with mock.patch.object(Path, 'expanduser', return_value=tmp_path / 'nonexistent.json'):
-            assert read_settings_effort() == 'medium?'
+            assert read_settings_effort() == 'medium'
 
     def test_invalid_json(self, tmp_path: Path) -> None:
         settings = tmp_path / 'settings.json'
         settings.write_text('{bad')
         with mock.patch.object(Path, 'expanduser', return_value=settings):
-            assert read_settings_effort() == 'medium?'
+            assert read_settings_effort() == 'medium'
 
     def test_no_effort_key(self, tmp_path: Path) -> None:
         settings = tmp_path / 'settings.json'
         settings.write_text(json.dumps({'model': 'opus'}))
         with mock.patch.object(Path, 'expanduser', return_value=settings):
-            assert read_settings_effort() == 'medium?'
+            assert read_settings_effort() == 'medium'
 
 
 class TestSessionCache:
@@ -504,12 +504,12 @@ class TestRefineEffortForModel:
         assert refine_effort_for_model('max', 'Haiku 4.5') == 'max'
 
     def test_unsupported_transcript_falls_back_to_settings(self) -> None:
-        with mock.patch('claude_vibeline.effort.read_settings_effort', return_value='xhigh?'):
+        with mock.patch('claude_vibeline.effort.read_settings_effort', return_value='xhigh'):
             assert refine_effort_for_model('max', 'Sonnet 4.6') == 'xhigh?'
 
     def test_unsupported_settings_passes_through_for_downstream_degrade(self) -> None:
         assert refine_effort_for_model('xhigh?', 'Sonnet 4.6') == 'xhigh?'
 
     def test_xhigh_transcript_on_unsupporting_model_falls_back(self) -> None:
-        with mock.patch('claude_vibeline.effort.read_settings_effort', return_value='medium?'):
+        with mock.patch('claude_vibeline.effort.read_settings_effort', return_value='medium'):
             assert refine_effort_for_model('xhigh', 'Sonnet 4.6') == 'medium?'

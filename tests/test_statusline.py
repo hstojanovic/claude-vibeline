@@ -36,7 +36,7 @@ def run_main(
     stdin_data: StdinData | dict[str, Any] | None = None,
     argv: list[str] | None = None,
     tmp_path: Path | None = None,
-    settings_effort: str = 'medium?',
+    settings_effort: str = 'medium',
 ) -> str:
     """
     Run main() with real effort resolution (no mocking resolve_effort).
@@ -215,7 +215,7 @@ class TestMain:
             'session_id': session_id,
             'model': {'display_name': 'Sonnet 4.6'},
         }
-        output = run_main(stdin_data=data, tmp_path=tmp_path, settings_effort='high?')
+        output = run_main(stdin_data=data, tmp_path=tmp_path, settings_effort='high')
         assert '(high?)' in output
         assert '(max)' not in output
         assert '(medium?)' not in output
@@ -303,9 +303,22 @@ class TestMain:
         assert '\033[' not in entry['output']
         assert entry['effort'] == 'high'
 
-    def test_settings_fallback_effort_shows_question_mark(self) -> None:
+    def test_settings_fallback_effort_in_fresh_session_has_no_question_mark(self) -> None:
         output = run_main()
         assert 'Opus 4.6' in output
+        assert '(medium)' in output
+        assert '(medium?)' not in output
+
+    def test_settings_fallback_after_synthetic_resume_shows_question_mark(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'sess.jsonl'
+        synthetic = json.dumps({
+            'type': 'assistant',
+            'timestamp': datetime.now(UTC).isoformat(),
+            'message': {'model': '<synthetic>', 'content': [{'type': 'text', 'text': 'No response requested.'}]},
+        })
+        transcript.write_text(synthetic + '\n')
+        data = {**STDIN_DATA, 'transcript_path': str(transcript), 'session_id': 'sess-resumed'}
+        output = run_main(stdin_data=data, tmp_path=tmp_path)
         assert '(medium?)' in output
 
     def test_effort_resolution_end_to_end(self, tmp_path: Path) -> None:

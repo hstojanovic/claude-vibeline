@@ -8,6 +8,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- Drop `?` suffix from effort display in fresh sessions when falling back to `settings.json`. The suffix now only appears when the fallback is genuinely uncertain (after a session resume, or when the transcript effort isn't supported on the current model)
+
 ## [3.0.0] - 2026-04-20
 
 ### Changed

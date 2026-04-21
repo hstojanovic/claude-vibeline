@@ -172,7 +172,7 @@ All locally cached data (usage responses, session state, update check) is versio
 
 - **Undocumented API** — the OAuth usage endpoint is undocumented and may break without notice.
 - **Limited stdin data** — the statusline process receives only a JSON blob on stdin. Claude Code's own CLI arguments (e.g. `--model`) and internal environment variables are not accessible.
-- **Effort level is inferred** — effort is not provided in stdin. It is resolved from the session transcript by scanning for `/model` and `/effort` commands, with a `settings.json` fallback shown with `?` suffix. After session resume, effort resets to the `?` fallback until `/effort` or `/model` is used.
+- **Effort level is inferred** — effort is not provided in stdin. It is resolved from the session transcript by scanning for `/model` and `/effort` commands, with a `settings.json` fallback. After session resume, effort is shown with a `?` suffix until `/effort` or `/model` is used.
 - **No session fork support** — forked sessions share a transcript file. The prompt cache countdown and effort detection may be inaccurate because messages from all forks are interleaved.
 - **No subagent tracking** — subagents run in separate sessions with their own prompt cache, but the statusline only tracks the main session's cache.
 
