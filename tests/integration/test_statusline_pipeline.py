@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 from unittest import mock
 
-from freezegun import freeze_time
+import time_machine
 
 from claude_vibeline.constants import ANSI_RE, EMPTY, FILL
-from claude_vibeline.statusline import is_new_session, main
+from claude_vibeline.statusline import main
 
 if TYPE_CHECKING:
     from claude_vibeline.schema import StdinData, UsageData
@@ -19,10 +19,6 @@ if TYPE_CHECKING:
 
 def _user(ts: str) -> str:
     return json.dumps({'type': 'user', 'timestamp': ts, 'message': {'content': 'hello'}})
-
-
-def _assistant(ts: str) -> str:
-    return json.dumps({'type': 'assistant', 'timestamp': ts})
 
 
 STDIN_DATA = {
@@ -234,7 +230,7 @@ class TestMain:
         assert '19%' in output
         assert '--' not in output
 
-    @freeze_time('2026-03-07T12:00:00Z')
+    @time_machine.travel('2026-03-07T12:00:00Z', tick=False)
     def test_stale_past_reset(self) -> None:
         usage_data: UsageData = {'seven_day_opus': {'utilization': 19, 'resets_at': '2026-03-07T10:00:00+00:00'}}
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(usage_data, time.time() - 120)):
@@ -396,13 +392,6 @@ class TestMessageLine:
         with mock.patch('claude_vibeline.statusline.check_for_update', return_value=None) as check:
             run_main(stdin_data=data, tmp_path=tmp_path)
         check.assert_called_once_with(is_new_session=False)
-
-    def test_is_new_session_none_id(self) -> None:
-        assert is_new_session(None) is False
-
-    def test_is_new_session_oserror_is_false(self) -> None:
-        with mock.patch('claude_vibeline.statusline.session_cache_dir', side_effect=OSError):
-            assert is_new_session('some-session') is False
 
 
 class TestProjectNameEdgeCases:

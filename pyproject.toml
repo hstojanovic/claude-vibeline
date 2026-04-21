@@ -31,11 +31,11 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "freezegun==1.5.5",
     "pytest==9.0.3",
     "pytest-cov==7.1.0",
     "responses==0.26.0",
     "ruff==0.15.11",
+    "time-machine==3.2.0",
     "ty==0.0.31",
     "types-requests>=2.33.0,<2.33.2",
 ]
@@ -127,7 +127,7 @@ split-on-trailing-comma = false
 ignore-overlong-task-comments = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests/unit", "tests/integration"]
 
 [tool.coverage.run]
 source = ["claude_vibeline"]

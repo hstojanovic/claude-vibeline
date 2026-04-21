@@ -2,7 +2,7 @@ import time
 from typing import TYPE_CHECKING
 
 import pytest
-from freezegun import freeze_time
+import time_machine
 
 from claude_vibeline.args import Args
 from claude_vibeline.constants import ANSI_RE, CACHE_LOW_THRESHOLD, EMPTY, FILL, NBSP, ORANGE, PERC, RESET, SEP
@@ -109,11 +109,11 @@ class TestCacheSection:
 
 
 class TestIsPast:
-    @freeze_time('2026-03-07T12:00:00Z')
+    @time_machine.travel('2026-03-07T12:00:00Z', tick=False)
     def test_future(self) -> None:
         assert not is_past('2026-03-07T15:00:00+00:00')
 
-    @freeze_time('2026-03-07T12:00:00Z')
+    @time_machine.travel('2026-03-07T12:00:00Z', tick=False)
     def test_past(self) -> None:
         assert is_past('2026-03-07T10:00:00+00:00')
 
@@ -149,7 +149,7 @@ class TestUsageSection:
         assert '42%' in result
         assert '?' not in result
 
-    @freeze_time('2026-03-07T12:00:00Z')
+    @time_machine.travel('2026-03-07T12:00:00Z', tick=False)
     def test_stale_past_reset(self) -> None:
         usage: UsageBucket = {'utilization': 42, 'resets_at': '2026-03-07T10:00:00+00:00'}
         result = usage_section('sess', usage, 8, stale_ts=time.time() - 120)
@@ -158,7 +158,7 @@ class TestUsageSection:
         assert '42%' not in result
         assert FILL not in result
 
-    @freeze_time('2026-03-07T12:00:00Z')
+    @time_machine.travel('2026-03-07T12:00:00Z', tick=False)
     def test_fresh_past_reset(self) -> None:
         usage: UsageBucket = {'utilization': 42, 'resets_at': '2026-03-07T10:00:00+00:00'}
         result = usage_section('sess', usage, 8)
@@ -193,14 +193,14 @@ class TestExtraSection:
         result = extra_section(extra, '$')
         assert result is None
 
-    @freeze_time('2026-02-15T12:00:00Z')
+    @time_machine.travel('2026-02-15T12:00:00Z', tick=False)
     def test_countdown_to_next_month(self) -> None:
         extra: ExtraUsage = {'is_enabled': True, 'used_credits': 100, 'monthly_limit': 2000}
         result = extra_section(extra, '$')
         assert result is not None
         assert '13d' in result
 
-    @freeze_time('2026-03-15T12:00:00Z')
+    @time_machine.travel('2026-03-15T12:00:00Z', tick=False)
     def test_stale_same_month(self) -> None:
         extra: ExtraUsage = {'is_enabled': True, 'used_credits': 250, 'monthly_limit': 2000}
         stale_ts = time.time() - 120
@@ -210,7 +210,7 @@ class TestExtraSection:
         assert '2.50' in result
         assert '?' not in result
 
-    @freeze_time('2026-03-01T00:30:00Z')
+    @time_machine.travel('2026-03-01T00:30:00Z', tick=False)
     def test_stale_previous_month(self) -> None:
         extra: ExtraUsage = {'is_enabled': True, 'used_credits': 250, 'monthly_limit': 2000}
         stale_ts = time.time() - 3600
@@ -221,20 +221,20 @@ class TestExtraSection:
 
 
 class TestFormatCountdown:
-    @freeze_time('2026-02-24T10:00:00Z')
+    @time_machine.travel('2026-02-24T10:00:00Z', tick=False)
     def test_future_days_and_hours(self) -> None:
         result = format_countdown('2026-02-27T14:30:00+00:00')
         assert '3d' in result
         assert '4h' in result
 
-    @freeze_time('2026-02-24T10:00:00Z')
+    @time_machine.travel('2026-02-24T10:00:00Z', tick=False)
     def test_hours_and_minutes(self) -> None:
         result = format_countdown('2026-02-24T13:45:00+00:00')
         assert '3h' in result
         assert '45m' in result
         assert 'd' not in result
 
-    @freeze_time('2026-02-24T10:00:00Z')
+    @time_machine.travel('2026-02-24T10:00:00Z', tick=False)
     def test_past_timestamp_clamps_to_zero(self) -> None:
         result = format_countdown('2026-02-20T00:00:00+00:00')
         assert '0m' in result
