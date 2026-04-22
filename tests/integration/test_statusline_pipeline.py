@@ -33,20 +33,28 @@ def run_main(
     argv: list[str] | None = None,
     tmp_path: Path | None = None,
     settings_effort: str = 'medium',
+    *,
+    stdin_bytes: bytes | None = None,
 ) -> str:
     """
     Run main() with real effort resolution (no mocking resolve_effort).
 
     Mocks session_cache_dir and read_settings_effort to avoid touching real
     user files, but exercises the full resolve_effort -> model_section pipeline.
+
+    Pass `stdin_bytes` to feed raw bytes to stdin (for malformed-input tests);
+    otherwise `stdin_data` is JSON-encoded.
     """
     import claude_vibeline.statusline as _mod  # noqa: PLC0415
 
-    data = stdin_data or STDIN_DATA
     argv = argv or ['claude-vibeline']
     cache_dir = (tmp_path or Path(tempfile.mkdtemp())) / 'sessions'
     cache_dir.mkdir(parents=True, exist_ok=True)
-    stdin_buf = io.BytesIO(json.dumps(data).encode())
+    if stdin_bytes is not None:
+        stdin_buf = io.BytesIO(stdin_bytes)
+    else:
+        data = stdin_data if stdin_data is not None else STDIN_DATA
+        stdin_buf = io.BytesIO(json.dumps(data).encode())
     stdout_buf = io.BytesIO()
     fake_stdin = io.TextIOWrapper(stdin_buf, encoding='utf-8')
     fake_stdout = io.TextIOWrapper(stdout_buf, encoding='utf-8')
@@ -98,14 +106,16 @@ class TestMain:
         assert '3%' in output
         assert '\u2265' not in output
 
-    def test_no_rate_limits_in_stdin(self, tmp_path: Path) -> None:
+    def test_no_rate_limits_in_stdin_renders_pending(self, tmp_path: Path) -> None:
         transcript_path, session_id = _effort_transcript('high', tmp_path)
         data = {**STDIN_DATA, 'transcript_path': transcript_path, 'session_id': session_id}
         output = run_main(stdin_data=data, tmp_path=tmp_path)
         assert 'my-project' in output
         assert 'Opus' in output
         assert '42%' in output
-        assert 'sess' not in output
+        assert 'sess' in output
+        assert 'week' in output
+        assert '—' in output
 
     def test_no_project_flag(self) -> None:
         output = run_main(argv=['claude-vibeline', '--no-project'])
@@ -235,29 +245,14 @@ class TestMain:
         usage_data: UsageData = {'seven_day_opus': {'utilization': 19, 'resets_at': '2026-03-07T10:00:00+00:00'}}
         with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(usage_data, time.time() - 120)):
             output = run_main(argv=['claude-vibeline', '--usage-api', '--opus'])
-        assert '?' in output
+        assert '\u21bb' in output
         assert '\u2265' not in output
+        assert '19%' not in output
 
     def test_dunder_main(self) -> None:
         with mock.patch('claude_vibeline.statusline.main') as mock_main:
             runpy.run_module('claude_vibeline', run_name='__main__')
         mock_main.assert_called_once()
-
-    def test_corrupt_stdin_outputs_nothing(self) -> None:
-        import claude_vibeline.statusline as _mod  # noqa: PLC0415
-
-        stdin_buf = io.BytesIO(b'{bad json')
-        stdout_buf = io.BytesIO()
-        fake_stdin = io.TextIOWrapper(stdin_buf, encoding='utf-8')
-        fake_stdout = io.TextIOWrapper(stdout_buf, encoding='utf-8')
-        with (
-            mock.patch('sys.argv', ['claude-vibeline']),
-            mock.patch.object(_mod.sys, 'stdin', fake_stdin),
-            mock.patch.object(_mod.sys, 'stdout', fake_stdout),
-        ):
-            main()
-            _mod.sys.stdout.flush()
-            assert stdout_buf.getvalue() == b''
 
     def test_cache_section_shown(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
@@ -378,6 +373,34 @@ class TestMessageLine:
         assert 'RuntimeError' in output
         assert 'boom' in output
 
+    def test_malformed_stdin_json_produces_error_message(self, tmp_path: Path) -> None:
+        output = run_main(stdin_bytes=b'not json at all {', tmp_path=tmp_path)
+        assert 'claude-vibeline' in output
+        assert 'invalid JSON on stdin' in output
+        # Render must be skipped when JSON is unparseable — no statusline segments
+        assert 'ctx' not in output
+        assert 'sess' not in output
+
+    def test_empty_json_object_still_renders(self, tmp_path: Path) -> None:
+        output = run_main(stdin_bytes=b'{}', tmp_path=tmp_path)
+        # Valid but empty JSON: render runs, segments fall back to placeholders
+        assert 'Unknown' in output
+        assert '—' in output
+        assert 'invalid JSON' not in output
+
+    def test_non_object_json_produces_error_message(self, tmp_path: Path) -> None:
+        output = run_main(stdin_bytes=b'[]', tmp_path=tmp_path)
+        assert 'claude-vibeline' in output
+        assert 'invalid JSON on stdin' in output
+        assert 'expected dict, got list' in output
+        assert 'ctx' not in output
+
+    def test_parse_error_takes_precedence_over_malformed_stdin(self, tmp_path: Path) -> None:
+        output = run_main(stdin_bytes=b'not json', argv=['claude-vibeline', '--bogus'], tmp_path=tmp_path)
+        assert 'claude-vibeline' in output
+        assert 'bogus' in output.lower()
+        assert 'invalid JSON on stdin' not in output
+
     def test_new_session_flag_passed_to_update_check(self, tmp_path: Path) -> None:
         data = {**STDIN_DATA, 'session_id': 'never-seen'}
         with mock.patch('claude_vibeline.statusline.check_for_update', return_value=None) as check:
@@ -468,3 +491,27 @@ class TestIndividualBucketFlags:
         with mock.patch('claude_vibeline.statusline.fetch_usage') as mock_fetch:
             run_main(stdin_data=data, argv=['claude-vibeline', '--opus', '--sonnet'])
         mock_fetch.assert_not_called()
+
+    def test_api_fetch_none_renders_pending(self) -> None:
+        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(None, None)):
+            output = run_main(argv=['claude-vibeline', '--usage-api', '--opus', '--sonnet', '--extra'])
+        assert 'opus' in output
+        assert 'sonnet' in output
+        assert 'extra' in output
+        assert output.count('—') >= 3
+
+    def test_extra_disabled_account_stays_omitted(self) -> None:
+        usage_data: UsageData = {'extra_usage': {'is_enabled': False, 'used_credits': 0}}
+        with mock.patch('claude_vibeline.statusline.fetch_usage', return_value=(usage_data, None)):
+            output = run_main(argv=['claude-vibeline', '--usage-api', '--extra'])
+        assert 'extra' not in output
+
+
+class TestPendingPlaceholders:
+    def test_fresh_session_default_flags(self) -> None:
+        # No rate_limits, no transcript_path — sess/week/cache all render pending.
+        output = run_main()
+        assert 'sess' in output
+        assert 'week' in output
+        assert 'cache' in output
+        assert output.count('—') >= 3

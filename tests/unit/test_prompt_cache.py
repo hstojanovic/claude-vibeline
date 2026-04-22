@@ -170,8 +170,10 @@ class TestHasCacheGap:
 
 
 class TestPromptCacheSection:
-    def test_no_transcript(self) -> None:
-        assert prompt_cache_section(None) is None
+    def test_no_transcript_renders_pending(self) -> None:
+        result = prompt_cache_section(None)
+        assert 'cache' in result
+        assert '—' in result
 
     def test_warm_cache(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
@@ -274,10 +276,12 @@ class TestPromptCacheSection:
         assert result is not None
         assert '\u21bb' in result
 
-    def test_no_user_messages(self, tmp_path: Path) -> None:
+    def test_no_user_messages_renders_pending(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'
         transcript.write_text(_assistant('2026-03-07T10:00:00Z') + '\n')
-        assert prompt_cache_section(str(transcript)) is None
+        result = prompt_cache_section(str(transcript))
+        assert 'cache' in result
+        assert '—' in result
 
     def test_caches_last_user_ts(self, tmp_path: Path) -> None:
         transcript = tmp_path / 'session.jsonl'

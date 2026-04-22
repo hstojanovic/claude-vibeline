@@ -118,7 +118,7 @@ Per-model and extra usage data is fetched from an undocumented Anthropic OAuth e
 
 - Requires a valid OAuth token from a Claude Pro, Max, or Team subscription.
 - Responses are cached locally for 60 seconds, and the cache is reused when the token expires or the API is unavailable.
-- If no token or cache exists, these sections are omitted.
+- If no token or cache exists, sections render as [pending](#pending-and-reset-states).
 - The API is only called when `--usage-api` is passed with at least one of `--opus`, `--sonnet`, or `--extra`.
 
 ## Prompt cache
@@ -132,6 +132,15 @@ Status icons:
 - `↻` — expired at some point since the last user message (prefix)
 
 The countdown is live (`◷ 4m`, `⚠ 47s`, `✗ 0s`), so set `refreshIntervalSeconds` in your statusline config to keep it current.
+
+## Pending and reset states
+
+Segments with no data yet or with a rolled-over window always render their label rather than disappearing. Two placeholders distinguish the states:
+
+- `—` — **pending**. No data yet (fresh session before the first message, or API fetch failed with no cache). Applies to `sess`, `week`, `cache`, `opus`, `sonnet`, and `extra`.
+- `↻` — **reset**. The rate-limit window has rolled over and a fresh number is on the way. Applies to `sess`, `week`, `opus`, `sonnet`, and `extra` (new calendar month).
+
+`extra` is the one exception: when the API reports `is_enabled: false` or omits the field (account has no extra usage configured), the segment is omitted entirely rather than rendered as pending.
 
 ## Session data caching
 
@@ -155,14 +164,14 @@ PyPI is queried on the first render of a new session, and at most once per 24 ho
 
 ## Error messages
 
-CLI parse errors (unknown flag, invalid value, missing argument) and unexpected render failures are shown as a message line below the statusline, prefixed with the program name so it's unambiguous where the error comes from:
+CLI parse errors (unknown flag, invalid value, missing argument), unexpected render failures, and malformed stdin JSON are shown as a message line below the statusline, prefixed with the program name so it's unambiguous where the error comes from:
 
 ```
 my-project │ Opus 4.7 (xhigh) │ ctx 1M [###-----] 42%
 claude-vibeline: Unrecognized arguments: --bogus
 ```
 
-The statusline still renders with defaults, so a bad flag no longer silences the output entirely. Error messages are always shown — there is no opt-out.
+The statusline still renders with defaults when the args are bad, so a bad flag no longer silences the output entirely. When stdin JSON is unparseable there is nothing to render and only the error message appears. Error messages are always shown — there is no opt-out.
 
 ## Local data
 

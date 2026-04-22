@@ -78,25 +78,43 @@ def format_countdown_ts(resets_at_ts: int) -> str:
     return f'{DIM}{"".join(parts)}{RESET}'
 
 
-def stdin_section(label: str, limit: StdinRateLimitBucket, bar_width: int) -> str | None:
+def pending_section(label: str) -> str:
+    """
+    Render a segment when no data is available yet.
+    """
+    return f'{LABEL}{label}{RESET} {DIM}\u2014{RESET}'
+
+
+def reset_section(label: str) -> str:
+    """
+    Render a segment when its window has rolled over and fresh data is pending.
+    """
+    return f'{LABEL}{label}{RESET} {DIM}\u21bb{RESET}'
+
+
+def stdin_section(label: str, limit: StdinRateLimitBucket | None, bar_width: int) -> str:
+    if limit is None:
+        return pending_section(label)
     perc = limit.get('used_percentage')
     if perc is None:
-        return None
+        return pending_section(label)
     resets_at = limit.get('resets_at')
     if resets_at is not None and time.time() >= resets_at:
-        return f'{LABEL}{label}{RESET} {DIM}?{RESET}'
+        return reset_section(label)
     perc_int = round(perc)
     countdown = format_countdown_ts(resets_at) if resets_at is not None else ''
     return f'{LABEL}{label}{RESET} {bar(perc_int, bar_width)} {PERC}{perc_int}%{RESET} {countdown}'
 
 
-def usage_section(label: str, usage: UsageBucket, bar_width: int, *, stale_ts: float | None = None) -> str | None:
+def usage_section(label: str, usage: UsageBucket | None, bar_width: int, *, stale_ts: float | None = None) -> str:
+    if usage is None:
+        return pending_section(label)
     perc = usage.get('utilization')
-    resets_at = usage.get('resets_at')
     if perc is None:
-        return None
+        return pending_section(label)
+    resets_at = usage.get('resets_at')
     if resets_at is not None and is_past(resets_at):
-        return f'{LABEL}{label}{RESET} {DIM}?{RESET}'
+        return reset_section(label)
     is_stale = stale_ts is not None
     perc_int = round(perc)
     approx = f'{DIM}\u2265{RESET}' if is_stale else ''
@@ -104,18 +122,21 @@ def usage_section(label: str, usage: UsageBucket, bar_width: int, *, stale_ts: f
     return f'{LABEL}{label}{RESET} {bar(perc_int, bar_width)} {approx}{PERC}{perc_int}%{RESET} {countdown}'
 
 
-def extra_section(extra: ExtraUsage, currency: str, *, stale_ts: float | None = None) -> str | None:
+def extra_section(extra: ExtraUsage | None, currency: str, *, stale_ts: float | None = None) -> str | None:
+    if extra is None:
+        return pending_section('extra')
+    # Missing is_enabled is treated as disabled (omits the segment).
     if not extra.get('is_enabled'):
         return None
     used_cents = extra.get('used_credits')
     if used_cents is None:
-        return None
+        return pending_section('extra')
     is_stale = stale_ts is not None
     if stale_ts is not None:
         cached = datetime.fromtimestamp(stale_ts, UTC)
         now = datetime.now(UTC)
         if (cached.year, cached.month) != (now.year, now.month):
-            return f'{LABEL}extra{RESET} {DIM}?{RESET}'
+            return reset_section('extra')
     used = used_cents / 100
     limit_cents = extra.get('monthly_limit')
     now = datetime.now(UTC)
@@ -129,35 +150,29 @@ def extra_section(extra: ExtraUsage, currency: str, *, stale_ts: float | None = 
     return f'{lbl} {approx}{PERC}{used:.2f}{currency}{RESET} {countdown}'
 
 
-def stdin_usage_parts(args: Args, stdin_limits: StdinRateLimits) -> list[str]:
+def stdin_usage_parts(args: Args, stdin_limits: StdinRateLimits | None) -> list[str]:
     parts: list[str] = []
-    if args.session and 'five_hour' in stdin_limits:
-        section = stdin_section('sess', stdin_limits['five_hour'], args.bar_width)
-        if section is not None:
-            parts.append(section)
-    if args.weekly and 'seven_day' in stdin_limits:
-        section = stdin_section('week', stdin_limits['seven_day'], args.bar_width)
-        if section is not None:
-            parts.append(section)
+    if args.session:
+        bucket = stdin_limits.get('five_hour') if stdin_limits is not None else None
+        parts.append(stdin_section('sess', bucket, args.bar_width))
+    if args.weekly:
+        bucket = stdin_limits.get('seven_day') if stdin_limits is not None else None
+        parts.append(stdin_section('week', bucket, args.bar_width))
     return parts
 
 
-def api_usage_parts(args: Args, api_usage: UsageData, stale_ts: float | None = None) -> list[str]:
+def api_usage_parts(args: Args, api_usage: UsageData | None, stale_ts: float | None = None) -> list[str]:
     parts: list[str] = []
     for enabled, key, label in [(args.opus, 'seven_day_opus', 'opus'), (args.sonnet, 'seven_day_sonnet', 'sonnet')]:
         if enabled:
-            bucket = api_usage.get(key)
-            if bucket is not None:
-                section = usage_section(label, bucket, args.bar_width, stale_ts=stale_ts)
-                if section is not None:
-                    parts.append(section)
+            bucket = api_usage.get(key) if api_usage is not None else None
+            parts.append(usage_section(label, bucket, args.bar_width, stale_ts=stale_ts))
 
     if args.extra:
-        extra = api_usage.get('extra_usage')
-        if extra is not None:
-            section = extra_section(extra, args.currency, stale_ts=stale_ts)
-            if section is not None:
-                parts.append(section)
+        extra = api_usage.get('extra_usage') if api_usage is not None else None
+        section = extra_section(extra, args.currency, stale_ts=stale_ts)
+        if section is not None:
+            parts.append(section)
 
     return parts
 

@@ -78,5 +78,5 @@ def write_debug_log(  # noqa: PLR0913, PLR0917
                 os.write(fd, line_bytes)
             finally:
                 os.close(fd)
-    except OSError:
+    except Exception:  # noqa: BLE001, S110 — debug logging is best-effort and must never crash the statusline
         pass

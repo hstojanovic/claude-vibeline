@@ -11,6 +11,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Changed
 
 - Drop `?` suffix from effort display in fresh sessions when falling back to `settings.json`. The suffix now only appears when the fallback is genuinely uncertain (after a session resume, or when the transcript effort isn't supported on the current model)
+- Always render enabled statusline segments. When `sess`/`week`/`cache`/`opus`/`sonnet`/`extra` have no data yet (fresh session, failed API fetch), they now show a dim `—` placeholder instead of being silently omitted. When a bucket's window has rolled over, they show `↻` instead of `?`. `extra` still stays omitted when the account's `is_enabled` is explicitly false
+- Surface malformed stdin JSON as an error message line (`claude-vibeline: invalid JSON on stdin: ...`) instead of exiting silently
 
 ## [3.0.0] - 2026-04-20
 

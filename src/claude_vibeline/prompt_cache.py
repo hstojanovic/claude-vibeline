@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from claude_vibeline.constants import PROMPT_CACHE_TTL, TAIL_CHUNK
-from claude_vibeline.display import cache_section
+from claude_vibeline.display import cache_section, pending_section
 from claude_vibeline.effort import read_session_cache, write_session_cache
 
 
@@ -61,15 +61,15 @@ def has_cache_gap(timestamps: list[float], last_user_idx: int | None = None) -> 
     return any(timestamps[i] - timestamps[i + 1] > PROMPT_CACHE_TTL for i in range(end))
 
 
-def prompt_cache_section(transcript_path: str | None, session_id: str | None = None) -> str | None:
+def prompt_cache_section(transcript_path: str | None, session_id: str | None = None) -> str:
     if transcript_path is None:
-        return None
+        return pending_section('cache')
     timestamps, last_user_idx = read_user_timestamps(transcript_path)
     cached = read_session_cache(session_id) if session_id is not None else {}
     if not timestamps:
         last_ts = cached.get('last_user_ts')
         if last_ts is None:
-            return None
+            return pending_section('cache')
     else:
         last_ts = timestamps[0]
         if session_id is not None and cached.get('last_user_ts') != last_ts:

@@ -30,16 +30,30 @@ if TYPE_CHECKING:
 
 def collect_usage(args: Args, data: StdinData) -> tuple[list[str], UsageData | None, float | None]:
     parts: list[str] = []
-    stdin_limits = data.get('rate_limits')
-    if stdin_limits is not None:
-        parts.extend(stdin_usage_parts(args, stdin_limits))
+    if args.session or args.weekly:
+        parts.extend(stdin_usage_parts(args, data.get('rate_limits')))
     api_usage: UsageData | None = None
     stale_ts: float | None = None
     if args.usage and (args.opus or args.sonnet or args.extra):
         api_usage, stale_ts = fetch_usage()
-        if api_usage is not None:
-            parts.extend(api_usage_parts(args, api_usage, stale_ts))
+        parts.extend(api_usage_parts(args, api_usage, stale_ts))
     return parts, api_usage, stale_ts
+
+
+def load_stdin_data(stream: io.TextIOWrapper) -> tuple[StdinData | None, str | None]:
+    """
+    Parse stdin as a JSON object.
+
+    Returns (data, error_msg). On success data is the dict and error_msg is
+    None. On failure data is None and error_msg explains why.
+    """
+    try:
+        parsed = json.load(stream)
+    except json.JSONDecodeError as e:
+        return None, f'invalid JSON on stdin: {e}'
+    if not isinstance(parsed, dict):
+        return None, f'invalid JSON on stdin: expected dict, got {type(parsed).__name__}'
+    return parsed, None
 
 
 def is_new_session(session_id: str | None) -> bool:
@@ -73,9 +87,7 @@ def render(args: Args, data: StdinData) -> tuple[str, str, UsageData | None, flo
         parts.append(model_section(model_name, effort))
 
     if args.cache:
-        section = prompt_cache_section(data.get('transcript_path'), data.get('session_id'))
-        if section is not None:
-            parts.append(section)
+        parts.append(prompt_cache_section(data.get('transcript_path'), data.get('session_id')))
 
     if args.context:
         ctx_window = data.get('context_window', {}).get('context_window_size')
@@ -104,23 +116,25 @@ def main() -> None:
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
 
-    try:
-        data: StdinData = json.load(sys.stdin)
-    except json.JSONDecodeError:
-        return
-
     output = ''
     effort = ''
     api_usage: UsageData | None = None
     stale_ts: float | None = None
     error_msg: str | None = parse_error
-    new_session = is_new_session(data.get('session_id'))
+    data: StdinData = {}
+    new_session = False
 
-    try:
-        output, effort, api_usage, stale_ts = render(args, data)
-    except Exception as e:  # noqa: BLE001 — any render failure surfaces as an error message
-        if error_msg is None:
-            error_msg = f'{type(e).__name__}: {e}'
+    parsed_data, json_error = load_stdin_data(sys.stdin)
+    if json_error is not None and error_msg is None:
+        error_msg = json_error
+    if parsed_data is not None:
+        data = parsed_data
+        new_session = is_new_session(data.get('session_id'))
+        try:
+            output, effort, api_usage, stale_ts = render(args, data)
+        except Exception as e:  # noqa: BLE001 — any render failure surfaces as an error message
+            if error_msg is None:
+                error_msg = f'{type(e).__name__}: {e}'
 
     message = (
         format_error_message(error_msg) if error_msg is not None else get_update_message(args, new_session=new_session)

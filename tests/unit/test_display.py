@@ -125,45 +125,49 @@ class TestUsageSection:
     def test_valid_data(self) -> None:
         usage: UsageBucket = {'utilization': 42, 'resets_at': '2099-01-01T00:00:00+00:00'}
         result = usage_section('sess', usage, 8)
-        assert result is not None
         assert 'sess' in result
         assert '42%' in result
         assert '\u2265' not in result
 
-    def test_none_pct(self) -> None:
+    def test_none_bucket_is_pending(self) -> None:
+        result = usage_section('sess', None, 8)
+        assert 'sess' in result
+        assert '\u2014' in result
+        assert FILL not in result
+
+    def test_none_pct_is_pending(self) -> None:
         usage: UsageBucket = {'utilization': None, 'resets_at': '2099-01-01T00:00:00+00:00'}
         result = usage_section('sess', usage, 8)
-        assert result is None
+        assert 'sess' in result
+        assert '\u2014' in result
+        assert FILL not in result
 
     def test_without_resets_at(self) -> None:
         usage: UsageBucket = {'utilization': 25}
         result = usage_section('week', usage, 8)
-        assert result is not None
         assert '25%' in result
 
     def test_stale_within_window(self) -> None:
         usage: UsageBucket = {'utilization': 42, 'resets_at': '2099-01-01T00:00:00+00:00'}
         result = usage_section('sess', usage, 8, stale_ts=time.time() - 120)
-        assert result is not None
         assert '\u2265' in result
         assert '42%' in result
-        assert '?' not in result
+        assert '\u21bb' not in result
 
     @time_machine.travel('2026-03-07T12:00:00Z', tick=False)
     def test_stale_past_reset(self) -> None:
         usage: UsageBucket = {'utilization': 42, 'resets_at': '2026-03-07T10:00:00+00:00'}
         result = usage_section('sess', usage, 8, stale_ts=time.time() - 120)
-        assert result is not None
-        assert '?' in result
+        assert '\u21bb' in result
         assert '42%' not in result
+        assert '\u2265' not in result
         assert FILL not in result
 
     @time_machine.travel('2026-03-07T12:00:00Z', tick=False)
     def test_fresh_past_reset(self) -> None:
         usage: UsageBucket = {'utilization': 42, 'resets_at': '2026-03-07T10:00:00+00:00'}
         result = usage_section('sess', usage, 8)
-        assert result is not None
-        assert '?' in result
+        assert '\u21bb' in result
         assert '42%' not in result
         assert FILL not in result
 
@@ -188,10 +192,18 @@ class TestExtraSection:
         result = extra_section(extra, '$')
         assert result is None
 
-    def test_missing_used_credits(self) -> None:
+    def test_none_extra_is_pending(self) -> None:
+        result = extra_section(None, '$')
+        assert result is not None
+        assert 'extra' in result
+        assert '\u2014' in result
+
+    def test_missing_used_credits_is_pending(self) -> None:
         extra: ExtraUsage = {'is_enabled': True, 'monthly_limit': 2000}
         result = extra_section(extra, '$')
-        assert result is None
+        assert result is not None
+        assert 'extra' in result
+        assert '\u2014' in result
 
     @time_machine.travel('2026-02-15T12:00:00Z', tick=False)
     def test_countdown_to_next_month(self) -> None:
@@ -208,7 +220,7 @@ class TestExtraSection:
         assert result is not None
         assert '\u2265' in result
         assert '2.50' in result
-        assert '?' not in result
+        assert '\u21bb' not in result
 
     @time_machine.travel('2026-03-01T00:30:00Z', tick=False)
     def test_stale_previous_month(self) -> None:
@@ -216,7 +228,7 @@ class TestExtraSection:
         stale_ts = time.time() - 3600
         result = extra_section(extra, '$', stale_ts=stale_ts)
         assert result is not None
-        assert '?' in result
+        assert '\u21bb' in result
         assert '2.50' not in result
 
 
@@ -380,30 +392,35 @@ class TestWrapPartsAnsi:
 class TestStdinSection:
     def test_renders_percentage_and_countdown(self) -> None:
         result = stdin_section('sess', {'used_percentage': 17.5, 'resets_at': 4070908800}, 8)
-        assert result is not None
         assert '18%' in result
         assert 'sess' in result
 
     def test_without_resets_at(self) -> None:
         result = stdin_section('sess', {'used_percentage': 5.0}, 8)
-        assert result is not None
         assert '5%' in result
 
-    def test_past_resets_at_shows_question_mark(self) -> None:
+    def test_past_resets_at_shows_recycle(self) -> None:
         result = stdin_section('sess', {'used_percentage': 10.0, 'resets_at': 0}, 8)
-        assert result is not None
-        assert '?' in result
+        assert '↻' in result
         assert '10%' not in result
+        assert FILL not in result
 
     def test_short_countdown_shows_minutes(self) -> None:
         soon = int(time.time()) + 3600
         result = stdin_section('sess', {'used_percentage': 10.0, 'resets_at': soon}, 8)
-        assert result is not None
         assert 'm' in result
 
-    def test_missing_percentage(self) -> None:
+    def test_none_bucket_is_pending(self) -> None:
+        result = stdin_section('sess', None, 8)
+        assert 'sess' in result
+        assert '—' in result
+        assert FILL not in result
+
+    def test_missing_percentage_is_pending(self) -> None:
         result = stdin_section('sess', {}, 8)
-        assert result is None
+        assert 'sess' in result
+        assert '—' in result
+        assert FILL not in result
 
 
 class TestStdinUsageParts:
@@ -411,16 +428,21 @@ class TestStdinUsageParts:
         args = Args()
         limits: StdinRateLimits = {'five_hour': {'used_percentage': 17, 'resets_at': 4070908800}}
         result = stdin_usage_parts(args, limits)
-        assert len(result) == 1
+        assert len(result) == 2
         assert 'sess' in result[0]
         assert '17%' in result[0]
+        assert 'week' in result[1]
+        assert '—' in result[1]
 
     def test_weekly_from_stdin(self) -> None:
         args = Args()
         limits: StdinRateLimits = {'seven_day': {'used_percentage': 7, 'resets_at': 4070908800}}
         result = stdin_usage_parts(args, limits)
-        assert len(result) == 1
-        assert 'week' in result[0]
+        assert len(result) == 2
+        assert 'sess' in result[0]
+        assert '—' in result[0]
+        assert 'week' in result[1]
+        assert '7%' in result[1]
 
     def test_both_from_stdin(self) -> None:
         args = Args()
@@ -434,18 +456,47 @@ class TestStdinUsageParts:
     def test_disabled_session(self) -> None:
         args = Args(session=False)
         limits: StdinRateLimits = {'five_hour': {'used_percentage': 15, 'resets_at': 4070908800}}
-        assert stdin_usage_parts(args, limits) == []
+        result = stdin_usage_parts(args, limits)
+        assert len(result) == 1
+        assert 'sess' not in result[0]
+        assert 'week' in result[0]
+        assert '—' in result[0]
 
-    def test_empty_limits(self) -> None:
+    def test_both_disabled_returns_empty(self) -> None:
+        args = Args(session=False, weekly=False)
+        assert stdin_usage_parts(args, None) == []
+
+    def test_empty_limits_pending(self) -> None:
         args = Args()
-        limits: StdinRateLimits = {}
-        assert stdin_usage_parts(args, limits) == []
+        result = stdin_usage_parts(args, {})
+        assert len(result) == 2
+        assert all('—' in p for p in result)
+
+    def test_none_limits_pending(self) -> None:
+        args = Args()
+        result = stdin_usage_parts(args, None)
+        assert len(result) == 2
+        assert any('sess' in p for p in result)
+        assert any('week' in p for p in result)
+        assert all('—' in p for p in result)
 
 
 class TestApiUsageParts:
-    def test_empty_usage_data(self) -> None:
+    def test_empty_usage_data_renders_pending(self) -> None:
         args = Args(opus=True)
-        assert api_usage_parts(args, {}) == []
+        result = api_usage_parts(args, {})
+        assert len(result) == 1
+        assert 'opus' in result[0]
+        assert '—' in result[0]
+
+    def test_none_usage_data_renders_pending(self) -> None:
+        args = Args(opus=True, sonnet=True, extra=True)
+        result = api_usage_parts(args, None)
+        assert len(result) == 3
+        assert any('opus' in p for p in result)
+        assert any('sonnet' in p for p in result)
+        assert any('extra' in p for p in result)
+        assert all('—' in p for p in result)
 
     def test_all_disabled_by_default(self) -> None:
         args = Args()
@@ -461,6 +512,11 @@ class TestApiUsageParts:
         result = api_usage_parts(args, usage)
         assert len(result) == 1
         assert 'opus' in result[0]
+
+    def test_extra_disabled_account_stays_omitted(self) -> None:
+        args = Args(extra=True)
+        usage: UsageData = {'extra_usage': {'is_enabled': False, 'used_credits': 0}}
+        assert api_usage_parts(args, usage) == []
 
 
 class TestModelSection:
