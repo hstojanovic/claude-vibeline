@@ -142,18 +142,13 @@ Segments with no data yet or with a rolled-over window always render their label
 
 `extra` is the one exception: when the API reports `is_enabled: false` or omits the field (account has no extra usage configured), the segment is omitted entirely rather than rendered as pending.
 
-## Session data caching
+## Message line
 
-Claude Vibeline caches per-session data to avoid redundant transcript parsing on every invocation. The cache stores:
+A second line below the statusline carries update notifications and error messages. When both could apply, errors take precedence — only one message is shown at a time.
 
-- **Effort level** — the resolved effort and the timestamp of the latest transcript entry processed, so subsequent invocations only scan new entries instead of re-reading the entire transcript.
-- **Last user message timestamp** — used by the prompt cache countdown as a fallback when the transcript cannot be read.
+### Update notifications
 
-Stale session files (older than 30 days) are cleaned up whenever a new session writes its first cache entry.
-
-## Update notifications
-
-When a newer version is published on PyPI, a message line appears below the statusline:
+When a newer version is published on PyPI:
 
 ```
 my-project │ Opus 4.7 (xhigh) │ ctx 1M [###-----] 42%
@@ -162,9 +157,9 @@ update available: 2.0.0 → 2.0.1 · uv tool upgrade claude-vibeline
 
 PyPI is queried on the first render of a new session, and at most once per 24 hours overall. The cached `latest` version is reused on every render in between. Disable with `--no-update`.
 
-## Error messages
+### Error messages
 
-CLI parse errors (unknown flag, invalid value, missing argument), unexpected render failures, and malformed stdin JSON are shown as a message line below the statusline, prefixed with the program name so it's unambiguous where the error comes from:
+CLI parse errors (unknown flag, invalid value, missing argument), unexpected render failures, and malformed stdin JSON are prefixed with the program name so it's unambiguous where the error comes from:
 
 ```
 my-project │ Opus 4.7 (xhigh) │ ctx 1M [###-----] 42%
@@ -173,7 +168,14 @@ claude-vibeline: Unrecognized arguments: --bogus
 
 The statusline still renders with defaults when the args are bad, so a bad flag no longer silences the output entirely. When stdin JSON is unparseable there is nothing to render and only the error message appears. Error messages are always shown — there is no opt-out.
 
-## Local data
+## Session data caching
+
+Claude Vibeline caches per-session data to avoid redundant transcript parsing on every invocation. The cache stores:
+
+- **Effort level** — the resolved effort and the timestamp of the latest transcript entry processed, so subsequent invocations only scan new entries instead of re-reading the entire transcript.
+- **Last user message timestamp** — used by the prompt cache countdown as a fallback when the transcript cannot be read.
+
+Stale session files (older than 30 days) are cleaned up whenever a new session writes its first cache entry.
 
 All locally cached data (usage responses, session state, update check) is version-stamped and automatically invalidated on upgrade.
 
