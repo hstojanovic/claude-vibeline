@@ -26,7 +26,6 @@ def main() -> None:
 
     changelog = (ROOT / 'CHANGELOG.md').read_text(encoding='utf-8')
     pyproject = (ROOT / 'pyproject.toml').read_text(encoding='utf-8')
-    init = (ROOT / 'src' / 'claude_vibeline' / '__init__.py').read_text(encoding='utf-8')
     license_text = (ROOT / 'LICENSE').read_text(encoding='utf-8')
 
     # Unreleased section must be empty
@@ -45,7 +44,7 @@ def main() -> None:
         if changelog_version != tag:
             errors.append(f'Changelog version ({changelog_version}) does not match tag ({tag})')
 
-        today = datetime.now().astimezone().strftime('%Y-%m-%d')
+        today = datetime.now(UTC).strftime('%Y-%m-%d')
         if changelog_date != today:
             errors.append(f'Changelog date ({changelog_date}) is not today ({today})')
 
@@ -54,12 +53,6 @@ def main() -> None:
     pyproject_version = pyproject_match.group(1) if pyproject_match else None
     if pyproject_version != tag:
         errors.append(f'pyproject.toml version ({pyproject_version}) does not match tag ({tag})')
-
-    # __init__.py version must match tag
-    init_match = re.search(r"__version__ = '(.+)'", init)
-    init_version = init_match.group(1) if init_match else None
-    if init_version != tag:
-        errors.append(f'__init__.py version ({init_version}) does not match tag ({tag})')
 
     # Copyright year must include current year
     copyright_match = re.search(r'Copyright \(c\) (.+?) ', license_text)

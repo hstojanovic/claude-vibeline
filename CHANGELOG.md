@@ -8,6 +8,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-05-05
+
 ### Changed
 
 - Drop `?` suffix from effort display in fresh sessions when falling back to `settings.json`. The suffix now only appears when the fallback is genuinely uncertain (after a session resume, or when the transcript effort isn't supported on the current model)
@@ -100,7 +102,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Add `--currency` option for extra usage currency symbol (default: `€`)
 - Add `--debug` flag to log each statusline output to a platform-specific log file
 
-[Unreleased]: https://github.com/hstojanovic/claude-vibeline/compare/3.0.0...HEAD
+[Unreleased]: https://github.com/hstojanovic/claude-vibeline/compare/3.1.0...HEAD
+[3.1.0]: https://github.com/hstojanovic/claude-vibeline/compare/3.0.0...3.1.0
 [3.0.0]: https://github.com/hstojanovic/claude-vibeline/compare/2.0.0...3.0.0
 [2.0.0]: https://github.com/hstojanovic/claude-vibeline/compare/1.1.0...2.0.0
 [1.1.0]: https://github.com/hstojanovic/claude-vibeline/compare/1.0.0...1.1.0
