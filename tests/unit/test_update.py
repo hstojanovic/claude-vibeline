@@ -6,7 +6,7 @@ from unittest import mock
 import responses
 
 from claude_vibeline import __version__ as app_version
-from claude_vibeline.constants import PYPI_URL, UPDATE_CHECK_INTERVAL
+from claude_vibeline.constants import NBSP, PYPI_URL, UPDATE_CHECK_INTERVAL
 from claude_vibeline.update import (
     _parse_version,
     check_for_update,
@@ -215,4 +215,4 @@ class TestFormatUpdateMessage:
         assert 'update' in msg
         assert app_version in msg
         assert '99.0.0' in msg
-        assert 'uv tool upgrade claude-vibeline' in msg
+        assert f'uv{NBSP}tool{NBSP}upgrade{NBSP}claude-vibeline' in msg

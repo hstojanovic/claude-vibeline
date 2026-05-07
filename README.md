@@ -50,6 +50,17 @@ To update:
 uv tool upgrade claude-vibeline
 ```
 
+You don't have to track new releases — the statusline shows an update notification when a newer version is available on PyPI:
+
+```
+my-project │ Opus 4.7 (xhigh) │ ctx 1M [###-----] 42%
+update available: 2.0.0 → 2.0.1 · uv tool upgrade claude-vibeline
+```
+
+PyPI is queried on the first render of a new session, and at most once per 24 hours overall. The cached `latest` version is reused on every render in between. Disable with `--no-update`.
+
+The notification shares a second line below the statusline with [error messages](#error-messages); errors take precedence when both apply.
+
 ## Setup
 
 Add to `~/.claude/settings.json`:
@@ -142,24 +153,9 @@ Segments with no data yet or with a rolled-over window always render their label
 
 `extra` is the one exception: when the API reports `is_enabled: false` or omits the field (account has no extra usage configured), the segment is omitted entirely rather than rendered as pending.
 
-## Message line
+## Error messages
 
-A second line below the statusline carries update notifications and error messages. When both could apply, errors take precedence — only one message is shown at a time.
-
-### Update notifications
-
-When a newer version is published on PyPI:
-
-```
-my-project │ Opus 4.7 (xhigh) │ ctx 1M [###-----] 42%
-update available: 2.0.0 → 2.0.1 · uv tool upgrade claude-vibeline
-```
-
-PyPI is queried on the first render of a new session, and at most once per 24 hours overall. The cached `latest` version is reused on every render in between. Disable with `--no-update`.
-
-### Error messages
-
-CLI parse errors (unknown flag, invalid value, missing argument), unexpected render failures, and malformed stdin JSON are prefixed with the program name so it's unambiguous where the error comes from:
+CLI parse errors (unknown flag, invalid value, missing argument), unexpected render failures, and malformed stdin JSON are shown on the same second line as update notifications, prefixed with the program name so it's unambiguous where the error comes from:
 
 ```
 my-project │ Opus 4.7 (xhigh) │ ctx 1M [###-----] 42%

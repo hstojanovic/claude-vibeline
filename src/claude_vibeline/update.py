@@ -111,5 +111,5 @@ def format_update_message(latest: str) -> str:
     return (
         f'{LABEL}{label}{RESET}{DIM}:{RESET} '
         f'{GOLD}{version_range}{RESET}{NBSP}{DIM}\u00b7{RESET} '
-        f'{DIM}uv tool upgrade claude-vibeline{RESET}'
+        f'{DIM}uv{NBSP}tool{NBSP}upgrade{NBSP}claude-vibeline{RESET}'
     )
