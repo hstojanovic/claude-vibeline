@@ -1,3 +1,11 @@
+"""
+Integration tests driving `main()` end-to-end via stdin/stdout.
+
+Covers full statusline rendering, CLI flag combinations, message-line precedence
+(errors vs updates), and effort resolution across transcript → model_section →
+session cache.
+"""
+
 import io
 import json
 import runpy

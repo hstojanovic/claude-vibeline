@@ -1,3 +1,10 @@
+"""
+Unit tests for `args.py`.
+
+Covers cappa CLI parsing: defaults, flags, unknown/invalid/missing arguments,
+help/version exits, and stderr suppression.
+"""
+
 from unittest import mock
 
 import cappa

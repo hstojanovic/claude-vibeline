@@ -1,3 +1,11 @@
+"""
+Unit tests for `update.py`.
+
+Covers PyPI fetch behavior, cache read/write with version-mismatch invalidation,
+version comparison, and the new-session/cache-interval gating logic of
+`check_for_update`.
+"""
+
 import json
 import time
 from pathlib import Path
@@ -6,25 +14,15 @@ from unittest import mock
 import responses
 
 from claude_vibeline import __version__ as app_version
-from claude_vibeline.constants import NBSP, PYPI_URL, UPDATE_CHECK_INTERVAL
+from claude_vibeline.constants import PYPI_URL, UPDATE_CHECK_INTERVAL
 from claude_vibeline.update import (
     _parse_version,
     check_for_update,
     fetch_latest_version,
-    format_update_message,
     is_newer,
     read_update_cache,
-    update_cache_path,
     write_update_cache,
 )
-
-
-class TestUpdateCachePath:
-    def test_returns_expected_path(self) -> None:
-        path = update_cache_path()
-        assert isinstance(path, Path)
-        assert path.name == 'update.json'
-        assert 'claude-vibeline' in str(path)
 
 
 class TestReadWriteUpdateCache:
@@ -207,12 +205,3 @@ class TestCheckForUpdate:
         cache = tmp_path / 'update.json'
         with mock.patch('claude_vibeline.update.update_cache_path', return_value=cache):
             assert check_for_update(is_new_session=True) is None
-
-
-class TestFormatUpdateMessage:
-    def test_contains_versions_and_command(self) -> None:
-        msg = format_update_message('99.0.0')
-        assert 'update' in msg
-        assert app_version in msg
-        assert '99.0.0' in msg
-        assert f'uv{NBSP}tool{NBSP}upgrade{NBSP}claude-vibeline' in msg

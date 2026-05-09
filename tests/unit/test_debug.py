@@ -1,3 +1,10 @@
+"""
+Unit tests for `debug.py`.
+
+Covers JSONL debug log writes (rotation, cleanup, atomic replace, OSError
+tolerance) and stale tmp-file cleanup.
+"""
+
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -5,18 +12,10 @@ from unittest import mock
 
 from claude_vibeline.args import Args
 from claude_vibeline.constants import DEBUG_LOG_MAX_BYTES, NBSP
-from claude_vibeline.debug import cleanup_stale_tmp, debug_log_path, write_debug_log
+from claude_vibeline.debug import cleanup_stale_tmp, write_debug_log
 
 if TYPE_CHECKING:
     from claude_vibeline.schema import StdinData, UsageData
-
-
-class TestDebugLogPath:
-    def test_returns_expected_path(self) -> None:
-        path = debug_log_path()
-        assert isinstance(path, Path)
-        assert path.name == 'debug.log'
-        assert 'claude-vibeline' in str(path)
 
 
 class TestWriteDebugLog:

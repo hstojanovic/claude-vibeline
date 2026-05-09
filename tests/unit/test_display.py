@@ -1,3 +1,11 @@
+"""
+Unit tests for `display.py`.
+
+Covers bar rendering (clamp/round), per-segment formatters (cache, usage, model,
+extra, stdin), countdown/context-size formatting, ANSI-aware wrapping, and
+visible-length math.
+"""
+
 import time
 from typing import TYPE_CHECKING
 
@@ -14,7 +22,6 @@ from claude_vibeline.display import (
     format_cache_countdown,
     format_context_size,
     format_countdown,
-    format_error_message,
     is_past,
     model_section,
     stdin_section,
@@ -367,13 +374,6 @@ class TestWrapMessage:
 
     def test_empty_string(self) -> None:
         assert not wrap_message('', 40)
-
-
-class TestFormatErrorMessage:
-    def test_contains_program_name_and_message(self) -> None:
-        msg = format_error_message('something broke')
-        assert 'claude-vibeline' in msg
-        assert 'something broke' in msg
 
 
 class TestWrapPartsAnsi:

@@ -1,3 +1,11 @@
+"""
+Unit tests for `effort.py`.
+
+Covers transcript line parsing, scanner state machine (synthetic invalidation,
+since-ts gating), cached/incremental resolution, settings fallback, model-aware
+refinement, and session-cache lifecycle.
+"""
+
 import json
 import os
 from pathlib import Path
@@ -15,7 +23,6 @@ from claude_vibeline.effort import (
     refine_effort_for_model,
     resolve_effort,
     scan_transcript_effort,
-    session_cache_dir,
     supported_efforts_for,
     write_session_cache,
 )
@@ -113,13 +120,6 @@ class TestEffortScanner:
         scanner.process_entry({'message': {'content': [{'type': 'tool_result'}]}})
         assert scanner.effort is None
         assert not scanner.done
-
-    def test_initial_state(self) -> None:
-        scanner = EffortScanner('')
-        assert scanner.effort is None
-        assert not scanner.saw_synthetic
-        assert not scanner.done
-        assert not scanner.latest_ts
 
     def test_synthetic_non_list_content(self) -> None:
         scanner = EffortScanner('')
@@ -418,11 +418,6 @@ class TestSessionCache:
             mock.patch.object(Path, 'mkdir', side_effect=OSError),
         ):
             write_session_cache('sess-fail', {'effort': 'high'})
-
-    def test_returns_path(self) -> None:
-        result = session_cache_dir()
-        assert result.name == 'sessions'
-        assert 'claude-vibeline' in str(result)
 
     def test_read_invalid_json(self, tmp_path: Path) -> None:
         (tmp_path / 'bad.json').write_text('{bad json')

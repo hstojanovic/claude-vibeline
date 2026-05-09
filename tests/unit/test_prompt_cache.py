@@ -1,3 +1,11 @@
+"""
+Unit tests for `prompt_cache.py`.
+
+Covers tail-chunked transcript reading, user-message detection (incl.
+tool_result), cache-gap detection relative to last user message, and
+rendered-section state per cache age.
+"""
+
 import json
 import time
 from datetime import UTC, datetime, timedelta

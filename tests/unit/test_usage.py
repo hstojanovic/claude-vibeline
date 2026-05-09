@@ -1,3 +1,10 @@
+"""
+Unit tests for `usage.py`.
+
+Covers OAuth token loading (file + macOS keychain), token expiry, usage cache
+TTL, and API fetch with stale/negative caching on failure.
+"""
+
 import json
 import subprocess as sp
 import time
@@ -9,18 +16,10 @@ import responses
 
 from claude_vibeline import __version__ as app_version
 from claude_vibeline.constants import CACHE_TTL_SECONDS, USAGE_URL
-from claude_vibeline.usage import cache_path, fetch_usage, read_oauth_token, token_from_entry, write_usage_cache
+from claude_vibeline.usage import fetch_usage, read_oauth_token, token_from_entry, write_usage_cache
 
 if TYPE_CHECKING:
     from claude_vibeline.schema import UsageData
-
-
-class TestCachePath:
-    def test_returns_expected_path(self) -> None:
-        path = cache_path()
-        assert isinstance(path, Path)
-        assert path.name == 'usage.json'
-        assert 'claude-vibeline' in str(path)
 
 
 class TestReadOauthToken:

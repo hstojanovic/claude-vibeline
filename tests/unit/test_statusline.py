@@ -1,3 +1,5 @@
+"""Unit tests for `statusline.py` helpers: `is_new_session` cache lookup including None/OSError edge cases."""
+
 from pathlib import Path
 from unittest import mock
 
