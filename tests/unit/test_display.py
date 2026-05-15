@@ -13,7 +13,7 @@ import pytest
 import time_machine
 
 from claude_vibeline.args import Args
-from claude_vibeline.constants import ANSI_RE, CACHE_LOW_THRESHOLD, EMPTY, FILL, NBSP, ORANGE, PERC, RESET, SEP
+from claude_vibeline.constants import ANSI_RE, CACHE_LOW_THRESHOLD, EMPTY, FILL, MODEL, NBSP, PERC, RESET, SEP
 from claude_vibeline.display import (
     api_usage_parts,
     bar,
@@ -360,7 +360,7 @@ class TestWrapMessage:
         assert result == 'aaa bbb\nccc ddd'
 
     def test_visible_length_ignores_ansi(self) -> None:
-        msg = f'{ORANGE}{"a" * 10}{RESET} {PERC}{"b" * 10}{RESET}'
+        msg = f'{MODEL}{"a" * 10}{RESET} {PERC}{"b" * 10}{RESET}'
         result = wrap_message(msg, 15)
         assert '\n' in result
         for line in result.split('\n'):
@@ -378,12 +378,12 @@ class TestWrapMessage:
 
 class TestWrapPartsAnsi:
     def test_ansi_parts_fit_on_one_line(self) -> None:
-        parts = [f'{ORANGE}hello{RESET}', f'{PERC}world{RESET}']
+        parts = [f'{MODEL}hello{RESET}', f'{PERC}world{RESET}']
         result = wrap_parts(parts, 40)
         assert '\n' not in result
 
     def test_ansi_parts_wrap_at_visible_width(self) -> None:
-        p1 = f'{ORANGE}{"a" * 10}{RESET}'
+        p1 = f'{MODEL}{"a" * 10}{RESET}'
         p2 = f'{PERC}{"b" * 10}{RESET}'
         result = wrap_parts([p1, p2], 15)
         assert '\n' in result

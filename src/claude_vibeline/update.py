@@ -10,13 +10,14 @@ import requests
 from claude_vibeline import __version__ as app_version
 from claude_vibeline.constants import (
     DIM,
-    GOLD,
     LABEL,
+    MUTED,
     NBSP,
     PYPI_URL,
     RESET,
     UPDATE_CHECK_INTERVAL,
     UPDATE_FETCH_TIMEOUT,
+    VERSION,
 )
 
 if TYPE_CHECKING:
@@ -110,6 +111,6 @@ def format_update_message(latest: str) -> str:
     version_range = f'{app_version}{NBSP}\u2192{NBSP}{latest}'
     return (
         f'{LABEL}{label}{RESET}{DIM}:{RESET} '
-        f'{GOLD}{version_range}{RESET}{NBSP}{DIM}\u00b7{RESET} '
-        f'{DIM}uv{NBSP}tool{NBSP}upgrade{NBSP}claude-vibeline{RESET}'
+        f'{VERSION}{version_range}{RESET}{NBSP}{DIM}\u00b7{RESET} '
+        f'{MUTED}uv{NBSP}tool{NBSP}upgrade{NBSP}claude-vibeline{RESET}'
     )

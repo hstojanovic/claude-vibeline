@@ -5,19 +5,22 @@ from typing import TYPE_CHECKING
 from claude_vibeline.constants import (
     ANSI_RE,
     BAR_EMPTY,
+    BAR_FILL,
+    CACHE_EXPIRED,
+    CACHE_LOW,
     CACHE_LOW_THRESHOLD,
+    CACHE_OK,
     DIM,
+    EFFORT,
     EMPTY,
+    ERROR,
     FILL,
-    GOLD,
-    GREEN,
     LABEL,
-    ORANGE,
+    MODEL,
+    MUTED,
     PERC,
-    RED,
     RESET,
     SEP,
-    YELLOW,
 )
 from claude_vibeline.effort import supported_efforts_for
 
@@ -33,7 +36,7 @@ def bar(perc: int, width: int) -> str:
     perc = max(0, min(100, perc))
     filled = round(perc * width / 100)
     empty = width - filled
-    return f'{ORANGE}{FILL * filled}{BAR_EMPTY}{EMPTY * empty}{RESET}'
+    return f'{BAR_FILL}{FILL * filled}{BAR_EMPTY}{EMPTY * empty}{RESET}'
 
 
 def format_countdown(resets_at_iso: str) -> str:
@@ -53,7 +56,7 @@ def format_countdown(resets_at_iso: str) -> str:
         parts.append(f'{h}h')
     if not d:
         parts.append(f'{m}m')
-    return f'{DIM}{"".join(parts)}{RESET}'
+    return f'{MUTED}{"".join(parts)}{RESET}'
 
 
 def is_past(resets_at_iso: str) -> bool:
@@ -75,21 +78,21 @@ def format_countdown_ts(resets_at_ts: int) -> str:
         parts.append(f'{h}h')
     if not d:
         parts.append(f'{m}m')
-    return f'{DIM}{"".join(parts)}{RESET}'
+    return f'{MUTED}{"".join(parts)}{RESET}'
 
 
 def pending_section(label: str) -> str:
     """
     Render a segment when no data is available yet.
     """
-    return f'{LABEL}{label}{RESET} {DIM}\u2014{RESET}'
+    return f'{LABEL}{label}{RESET} {MUTED}\u2014{RESET}'
 
 
 def reset_section(label: str) -> str:
     """
     Render a segment when its window has rolled over and fresh data is pending.
     """
-    return f'{LABEL}{label}{RESET} {DIM}\u21bb{RESET}'
+    return f'{LABEL}{label}{RESET} {MUTED}\u21bb{RESET}'
 
 
 def stdin_section(label: str, limit: StdinRateLimitBucket | None, bar_width: int) -> str:
@@ -117,7 +120,7 @@ def usage_section(label: str, usage: UsageBucket | None, bar_width: int, *, stal
         return reset_section(label)
     is_stale = stale_ts is not None
     perc_int = round(perc)
-    approx = f'{DIM}\u2265{RESET}' if is_stale else ''
+    approx = f'{MUTED}\u2265{RESET}' if is_stale else ''
     countdown = format_countdown(resets_at) if resets_at is not None else ''
     return f'{LABEL}{label}{RESET} {bar(perc_int, bar_width)} {approx}{PERC}{perc_int}%{RESET} {countdown}'
 
@@ -143,7 +146,7 @@ def extra_section(extra: ExtraUsage | None, currency: str, *, stale_ts: float | 
     next_month = (now.replace(day=1) + timedelta(days=32)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     countdown = format_countdown(next_month.isoformat())
     lbl = f'{LABEL}extra{RESET}'
-    approx = f'{DIM}\u2265{RESET}' if is_stale else ''
+    approx = f'{MUTED}\u2265{RESET}' if is_stale else ''
     if limit_cents is not None:
         limit = limit_cents // 100
         return f'{lbl} {approx}{PERC}{used:.2f}{RESET}{DIM}/{RESET}{PERC}{limit}{currency}{RESET} {countdown}'
@@ -180,13 +183,13 @@ def api_usage_parts(args: Args, api_usage: UsageData | None, stale_ts: float | N
 def model_section(model_name: str, effort: str) -> str:
     supported = supported_efforts_for(model_name)
     if supported is None:
-        return f'{ORANGE}{model_name}{RESET}'
+        return f'{MODEL}{model_name}{RESET}'
     bare = effort.rstrip('?')
     if bare in supported:
-        return f'{ORANGE}{model_name}{RESET} {GOLD}({effort}){RESET}'
+        return f'{MODEL}{model_name}{RESET} {EFFORT}({effort}){RESET}'
     if bare == 'xhigh' and 'high' in supported:
-        return f'{ORANGE}{model_name}{RESET} {GOLD}(high?){RESET}'
-    return f'{ORANGE}{model_name}{RESET} {GOLD}(medium?){RESET}'
+        return f'{MODEL}{model_name}{RESET} {EFFORT}(high?){RESET}'
+    return f'{MODEL}{model_name}{RESET} {EFFORT}(medium?){RESET}'
 
 
 def format_context_size(tokens: int) -> str:
@@ -208,14 +211,14 @@ def format_cache_countdown(secs_left: int) -> str:
 
 
 def cache_section(secs_left: int, *, gap: bool) -> str:
-    gap_icon = f'{RED}\u21bb{RESET} ' if gap else ''
+    gap_icon = f'{ERROR}\u21bb{RESET} ' if gap else ''
     display = format_cache_countdown(max(0, secs_left))
     if secs_left <= 0:
-        color, icon = RED, '\u2717'
+        color, icon = CACHE_EXPIRED, '\u2717'
     elif secs_left <= CACHE_LOW_THRESHOLD:
-        color, icon = YELLOW, '\u26a0'
+        color, icon = CACHE_LOW, '\u26a0'
     else:
-        color, icon = GREEN, '\u25f7'
+        color, icon = CACHE_OK, '\u25f7'
     return f'{LABEL}cache{RESET} {gap_icon}{color}{icon} {display}{RESET}'
 
 
@@ -270,4 +273,4 @@ def wrap_message(text: str, columns: int) -> str:
 
 
 def format_error_message(msg: str) -> str:
-    return f'{LABEL}claude-vibeline{RESET}{DIM}:{RESET} {RED}{msg}{RESET}'
+    return f'{LABEL}claude-vibeline{RESET}{DIM}:{RESET} {ERROR}{msg}{RESET}'

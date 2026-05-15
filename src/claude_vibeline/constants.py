@@ -1,17 +1,21 @@
 import re
 
-# Colors (Claude palette)
+# Colors (Claude palette) — named by role, not hue
 RESET = '\033[0m'
-ORANGE = '\033[38;5;209m'
-CREAM = '\033[1;38;5;222m'
-GOLD = '\033[38;5;180m'
+PROJECT = '\033[38;5;215m'
+MODEL = '\033[38;5;209m'
+BAR_FILL = '\033[38;5;209m'
+BAR_EMPTY = '\033[38;5;244m'
+EFFORT = '\033[38;5;173m'
+VERSION = '\033[38;5;173m'
 LABEL = '\033[38;5;137m'
+PERC = '\033[38;5;179m'
 DIM = '\033[38;5;240m'
-BAR_EMPTY = '\033[38;5;238m'
-PERC = '\033[38;5;222m'
-GREEN = '\033[38;5;114m'
-YELLOW = '\033[38;5;179m'
-RED = '\033[38;5;167m'
+MUTED = '\033[38;5;244m'
+CACHE_OK = '\033[38;5;71m'
+CACHE_LOW = '\033[38;5;179m'
+CACHE_EXPIRED = '\033[38;5;167m'
+ERROR = '\033[38;5;167m'
 
 FILL = '\u2588'
 EMPTY = '\u2591'

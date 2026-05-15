@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from claude_vibeline.args import parse_args
-from claude_vibeline.constants import CREAM, DIM, LABEL, PERC, RESET
+from claude_vibeline.constants import LABEL, MUTED, PERC, PROJECT, RESET
 from claude_vibeline.debug import write_debug_log
 from claude_vibeline.display import (
     api_usage_parts,
@@ -81,7 +81,7 @@ def render(args: Args, data: StdinData) -> tuple[str, str, UsageData | None, flo
     parts: list[str] = []
 
     if args.project and project_name and project_name != '.':
-        parts.append(f'{CREAM}{project_name}{RESET}')
+        parts.append(f'{PROJECT}{project_name}{RESET}')
 
     if args.model:
         parts.append(model_section(model_name, effort))
@@ -91,7 +91,7 @@ def render(args: Args, data: StdinData) -> tuple[str, str, UsageData | None, flo
 
     if args.context:
         ctx_window = data.get('context_window', {}).get('context_window_size')
-        ctx_size = f' {DIM}{format_context_size(ctx_window)}{RESET}' if isinstance(ctx_window, int) else ''
+        ctx_size = f' {MUTED}{format_context_size(ctx_window)}{RESET}' if isinstance(ctx_window, int) else ''
         parts.append(f'{LABEL}ctx{RESET}{ctx_size} {bar(used_perc, args.bar_width)} {PERC}{used_perc}%{RESET}')
 
     usage_result, api_usage, stale_ts = collect_usage(args, data)

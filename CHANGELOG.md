@@ -8,6 +8,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- Re-tune statusline palette for readability on both light and dark terminal backgrounds
+
 ### Fixed
 
 - Render `uv tool upgrade claude-vibeline` in update notifications with non-breaking spaces between tokens, so the command stays on a single line when the message wraps
