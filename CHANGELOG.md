@@ -8,6 +8,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-05-15
+
 ### Changed
 
 - Re-tune statusline palette for readability on both light and dark terminal backgrounds
@@ -110,7 +112,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Add `--currency` option for extra usage currency symbol (default: `€`)
 - Add `--debug` flag to log each statusline output to a platform-specific log file
 
-[Unreleased]: https://github.com/hstojanovic/claude-vibeline/compare/3.1.0...HEAD
+[Unreleased]: https://github.com/hstojanovic/claude-vibeline/compare/3.1.1...HEAD
+[3.1.1]: https://github.com/hstojanovic/claude-vibeline/compare/3.1.0...3.1.1
 [3.1.0]: https://github.com/hstojanovic/claude-vibeline/compare/3.0.0...3.1.0
 [3.0.0]: https://github.com/hstojanovic/claude-vibeline/compare/2.0.0...3.0.0
 [2.0.0]: https://github.com/hstojanovic/claude-vibeline/compare/1.1.0...2.0.0
