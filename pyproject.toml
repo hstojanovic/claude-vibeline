@@ -26,7 +26,7 @@ classifiers = [
 dependencies = [
     "cappa==0.31.0",
     "platformdirs==4.9.6",
-    "requests==2.33.1",
+    "requests==2.34.2",
 ]
 
 [dependency-groups]
