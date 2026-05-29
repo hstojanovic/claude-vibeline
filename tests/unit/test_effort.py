@@ -475,6 +475,12 @@ class TestCleanupSessionCache:
 
 
 class TestSupportedEffortsFor:
+    def test_opus_4_8(self) -> None:
+        assert supported_efforts_for('Opus 4.8') == {'low', 'medium', 'high', 'xhigh', 'max'}
+
+    def test_opus_4_8_with_suffix(self) -> None:
+        assert supported_efforts_for('Opus 4.8 (1M context)') == {'low', 'medium', 'high', 'xhigh', 'max'}
+
     def test_opus_4_7(self) -> None:
         assert supported_efforts_for('Opus 4.7') == {'low', 'medium', 'high', 'xhigh', 'max'}
 

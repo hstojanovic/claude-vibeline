@@ -8,6 +8,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- Add Opus 4.8 effort-level support (`low`/`medium`/`high`/`xhigh`/`max`, same set as Opus 4.7); the effort indicator now renders for Opus 4.8 instead of being hidden
+
 ## [3.1.1] - 2026-05-15
 
 ### Changed

@@ -11,7 +11,7 @@
 A custom statusline for [Claude Code](https://claude.com/product/claude-code) that shows session details, prompt cache status, and rate limits — designed for Pro, Max, and Team users.
 
 ```
-my-project │ Opus 4.7 (xhigh) │ cache ◷ 4m │ ctx 1M [###-----] 42% │
+my-project │ Opus 4.8 (xhigh) │ cache ◷ 4m │ ctx 1M [###-----] 42% │
 sess [##------] 19% 3h12m │ week [--------] 3% 5d20h
 ```
 
@@ -53,7 +53,7 @@ uv tool upgrade claude-vibeline
 You don't have to track new releases — the statusline shows an update notification when a newer version is available on PyPI:
 
 ```
-my-project │ Opus 4.7 (xhigh) │ ctx 1M [###-----] 42%
+my-project │ Opus 4.8 (xhigh) │ ctx 1M [###-----] 42%
 update available: 2.0.0 → 2.0.1 · uv tool upgrade claude-vibeline
 ```
 
@@ -111,7 +111,7 @@ Example with all API sections enabled:
 ```
 
 ```
-my-project │ Opus 4.7 (xhigh) │ cache ◷ 4m │ ctx 1M [###-----] 42% │
+my-project │ Opus 4.8 (xhigh) │ cache ◷ 4m │ ctx 1M [###-----] 42% │
 sess [##------] 19% 3h12m │ week [--------] 3% 5d20h │
 opus [#-------] 10% 5d20h │ sonnet [--------] 2% 5d20h │
 extra 1.23/20$ 7d0h
@@ -158,7 +158,7 @@ Segments with no data yet or with a rolled-over window always render their label
 CLI parse errors (unknown flag, invalid value, missing argument), unexpected render failures, and malformed stdin JSON are shown on the same second line as update notifications, prefixed with the program name so it's unambiguous where the error comes from:
 
 ```
-my-project │ Opus 4.7 (xhigh) │ ctx 1M [###-----] 42%
+my-project │ Opus 4.8 (xhigh) │ ctx 1M [###-----] 42%
 claude-vibeline: Unrecognized arguments: --bogus
 ```
 
