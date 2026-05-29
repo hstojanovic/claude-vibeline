@@ -2,7 +2,8 @@
 Unit tests for `usage.py`.
 
 Covers OAuth token loading (file + macOS keychain), token expiry, usage cache
-TTL, and API fetch with stale/negative caching on failure.
+TTL, and API fetch with stale-cache fallback (and a persistent staleness
+marker) on failure.
 """
 
 import json
@@ -175,7 +176,7 @@ class TestFetchUsage:
         assert stale_ts is None
 
     @responses.activate
-    def test_api_error_returns_none_and_caches_negative(self, tmp_path: Path) -> None:
+    def test_api_error_with_no_cache_returns_none_without_writing(self, tmp_path: Path) -> None:
         responses.add(responses.GET, USAGE_URL, status=500)
 
         cache = tmp_path / 'usage.json'
@@ -187,7 +188,8 @@ class TestFetchUsage:
 
         assert result is None
         assert stale_ts is None
-        assert cache.exists()
+        # Failures no longer write a negative cache, so a retry happens next render.
+        assert not cache.exists()
 
     @responses.activate
     def test_invalid_json_response(self, tmp_path: Path) -> None:
@@ -235,3 +237,45 @@ class TestFetchUsage:
         assert result is not None
         assert result['five_hour']['utilization'] == 30
         assert isinstance(stale_ts, float)
+
+    @responses.activate
+    def test_stale_marker_persists_across_renders_on_api_error(self, tmp_path: Path) -> None:
+        # The marker must not flicker: serving the same un-refreshed data twice
+        # should report the same age both times, since _ts is never bumped on failure.
+        cache = tmp_path / 'usage.json'
+        fetched_at = time.time() - CACHE_TTL_SECONDS - 1
+        cache.write_text(json.dumps({'five_hour': {'utilization': 10}, '_ts': fetched_at, '_v': app_version}))
+        responses.add(responses.GET, USAGE_URL, status=500)
+
+        with (
+            mock.patch('claude_vibeline.usage.cache_path', return_value=cache),
+            mock.patch('claude_vibeline.usage.read_oauth_token', return_value='tok'),
+        ):
+            r1, s1 = fetch_usage()
+            r2, s2 = fetch_usage()
+
+        assert r1 == {'five_hour': {'utilization': 10}}
+        assert r2 == {'five_hour': {'utilization': 10}}
+        assert isinstance(s1, float)
+        assert s2 == s1
+
+    def test_no_token_rereads_credentials_every_render(self, tmp_path: Path) -> None:
+        # A token written mid-session must be picked up next render, so the
+        # no-token path must re-read credentials rather than throttle.
+        cache = tmp_path / 'usage.json'
+        cache.write_text(
+            json.dumps({
+                'five_hour': {'utilization': 30},
+                '_ts': time.time() - CACHE_TTL_SECONDS - 1,
+                '_v': app_version,
+            })
+        )
+
+        with (
+            mock.patch('claude_vibeline.usage.cache_path', return_value=cache),
+            mock.patch('claude_vibeline.usage.read_oauth_token', return_value=None) as read_token,
+        ):
+            fetch_usage()
+            fetch_usage()
+
+        assert read_token.call_count == 2

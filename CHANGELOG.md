@@ -12,6 +12,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - Add Opus 4.8 effort-level support (`low`/`medium`/`high`/`xhigh`/`max`, same set as Opus 4.7); the effort indicator now renders for Opus 4.8 instead of being hidden
 
+### Fixed
+
+- Keep the usage staleness marker (`≥`) shown for as long as cached `--usage-api` data is served after a failed refresh; it previously appeared for a single render and then vanished while the same stale numbers kept showing
+- Pick up a newly-written OAuth credential on the next render when no token was present, instead of staying on the pending placeholder for up to 60 seconds
+
 ## [3.1.1] - 2026-05-15
 
 ### Changed

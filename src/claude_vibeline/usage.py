@@ -58,27 +58,39 @@ def cache_path() -> Path:
 
 
 def fetch_usage() -> tuple[UsageData | None, float | None]:
+    """
+    Return (usage, stale_ts) from the OAuth API, falling back to cache.
+
+    `_ts` is the time of the last *successful* fetch and is only ever advanced
+    by a success. Within CACHE_TTL_SECONDS of it the cached data is served as
+    current; past that a refresh is attempted, and on failure the cached data is
+    served with its real age via `stale_ts` so the staleness marker reflects how
+    old the data actually is. Because failures never touch the cache, the marker
+    doesn't flicker off between renders and a credential written mid-session is
+    picked up on the next render.
+    """
     cache = cache_path()
     stale: UsageData | None = None
-    stale_ts: float = 0
+    data_ts: float = 0
     try:
         if cache.exists():
             cached = json.loads(cache.read_text())
             if cached.get('_v') != app_version:
                 cache.unlink(missing_ok=True)
             else:
-                stale_ts = cached.pop('_ts', 0)
+                data_ts = cached.pop('_ts', 0)
                 cached.pop('_v', None)
                 stale = cached or None
-                if time.time() - stale_ts < CACHE_TTL_SECONDS:
+                if stale is not None and time.time() - data_ts < CACHE_TTL_SECONDS:
                     return stale, None
     except OSError, json.JSONDecodeError:
         pass
 
+    marker = data_ts if stale is not None else None
+
     token = read_oauth_token()
     if token is None:
-        write_usage_cache(cache, stale)
-        return stale, stale_ts if stale is not None else None
+        return stale, marker
 
     try:
         resp = requests.get(
@@ -87,8 +99,7 @@ def fetch_usage() -> tuple[UsageData | None, float | None]:
         resp.raise_for_status()
         data: UsageData = resp.json()
     except requests.RequestException, json.JSONDecodeError:
-        write_usage_cache(cache, stale)
-        return stale, stale_ts if stale is not None else None
+        return stale, marker
 
     write_usage_cache(cache, data)
     return data, None
