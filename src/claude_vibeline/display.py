@@ -39,13 +39,13 @@ def bar(perc: int, width: int) -> str:
     return f'{BAR_FILL}{FILL * filled}{BAR_EMPTY}{EMPTY * empty}{RESET}'
 
 
-def format_countdown(resets_at_iso: str) -> str:
-    try:
-        resets_at = datetime.fromisoformat(resets_at_iso)
-    except ValueError:
-        return ''
-    now = datetime.now(UTC)
-    secs_left = max(0, int((resets_at - now).total_seconds()))
+def format_countdown_secs(secs_left: int) -> str:
+    """
+    Format a duration as a compact "Nd Nh Nm" countdown.
+
+    Minutes are dropped once the gap is a day or more, to keep it short.
+    """
+    secs_left = max(0, secs_left)
     d = secs_left // 86400
     h = (secs_left % 86400) // 3600
     m = (secs_left % 3600) // 60
@@ -57,6 +57,14 @@ def format_countdown(resets_at_iso: str) -> str:
     if not d:
         parts.append(f'{m}m')
     return f'{MUTED}{"".join(parts)}{RESET}'
+
+
+def format_countdown(resets_at_iso: str) -> str:
+    try:
+        resets_at = datetime.fromisoformat(resets_at_iso)
+    except ValueError:
+        return ''
+    return format_countdown_secs(int((resets_at - datetime.now(UTC)).total_seconds()))
 
 
 def is_past(resets_at_iso: str) -> bool:
@@ -67,18 +75,7 @@ def is_past(resets_at_iso: str) -> bool:
 
 
 def format_countdown_ts(resets_at_ts: int) -> str:
-    secs_left = max(0, resets_at_ts - int(time.time()))
-    d = secs_left // 86400
-    h = (secs_left % 86400) // 3600
-    m = (secs_left % 3600) // 60
-    parts: list[str] = []
-    if d:
-        parts.append(f'{d}d')
-    if d or h:
-        parts.append(f'{h}h')
-    if not d:
-        parts.append(f'{m}m')
-    return f'{MUTED}{"".join(parts)}{RESET}'
+    return format_countdown_secs(resets_at_ts - int(time.time()))
 
 
 def pending_section(label: str) -> str:
@@ -134,15 +131,14 @@ def extra_section(extra: ExtraUsage | None, currency: str, *, stale_ts: float | 
     used_cents = extra.get('used_credits')
     if used_cents is None:
         return pending_section('extra')
+    now = datetime.now(UTC)
     is_stale = stale_ts is not None
     if stale_ts is not None:
         cached = datetime.fromtimestamp(stale_ts, UTC)
-        now = datetime.now(UTC)
         if (cached.year, cached.month) != (now.year, now.month):
             return reset_section('extra')
     used = used_cents / 100
     limit_cents = extra.get('monthly_limit')
-    now = datetime.now(UTC)
     next_month = (now.replace(day=1) + timedelta(days=32)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     countdown = format_countdown(next_month.isoformat())
     lbl = f'{LABEL}extra{RESET}'
