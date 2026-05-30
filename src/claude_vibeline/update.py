@@ -61,7 +61,7 @@ def fetch_latest_version() -> str | None:
     return version if isinstance(version, str) else None
 
 
-def _parse_version(v: str) -> tuple[int, ...] | None:
+def parse_version(v: str) -> tuple[int, ...] | None:
     parts: list[int] = []
     for p in v.split('.'):
         if not p.isdigit():
@@ -71,7 +71,7 @@ def _parse_version(v: str) -> tuple[int, ...] | None:
 
 
 def is_newer(latest: str, current: str) -> bool:
-    a, b = _parse_version(latest), _parse_version(current)
+    a, b = parse_version(latest), parse_version(current)
     if a is None or b is None:
         return False
     return a > b

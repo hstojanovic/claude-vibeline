@@ -16,10 +16,10 @@ import responses
 from claude_vibeline import __version__ as app_version
 from claude_vibeline.constants import PYPI_URL, UPDATE_CHECK_INTERVAL
 from claude_vibeline.update import (
-    _parse_version,
     check_for_update,
     fetch_latest_version,
     is_newer,
+    parse_version,
     read_update_cache,
     write_update_cache,
 )
@@ -88,19 +88,19 @@ class TestFetchLatestVersion:
 
 class TestParseVersion:
     def test_basic(self) -> None:
-        assert _parse_version('1.2.3') == (1, 2, 3)
+        assert parse_version('1.2.3') == (1, 2, 3)
 
     def test_single(self) -> None:
-        assert _parse_version('5') == (5,)
+        assert parse_version('5') == (5,)
 
     def test_empty(self) -> None:
-        assert _parse_version('') is None
+        assert parse_version('') is None
 
     def test_non_digit(self) -> None:
-        assert _parse_version('1.2.3-beta') is None
+        assert parse_version('1.2.3-beta') is None
 
     def test_alpha_component(self) -> None:
-        assert _parse_version('1.a.3') is None
+        assert parse_version('1.a.3') is None
 
 
 class TestIsNewer:

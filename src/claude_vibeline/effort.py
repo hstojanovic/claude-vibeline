@@ -85,6 +85,7 @@ def read_session_cache(session_id: str) -> SessionCache:
         return {}
     if data.get('_v') != app_version:
         return {}
+    data.pop('_v', None)
     return data
 
 
