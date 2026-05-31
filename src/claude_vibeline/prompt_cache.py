@@ -44,7 +44,7 @@ def parse_user_timestamps(text: str) -> tuple[list[float], int | None]:
             entry = json.loads(line)
             if entry.get('type') == 'user':
                 ts = entry.get('timestamp')
-                if ts is not None:
+                if isinstance(ts, str):
                     timestamps.append(datetime.fromisoformat(ts).timestamp())
                     if last_user_idx is None and is_user_message(entry):
                         last_user_idx = len(timestamps) - 1

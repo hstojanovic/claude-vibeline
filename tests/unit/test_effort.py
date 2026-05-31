@@ -138,6 +138,16 @@ class TestEffortScanner:
         scanner.process_entry({'message': {'model': '<synthetic>', 'content': ['not a dict', 42]}})
         assert not scanner.saw_synthetic
 
+    def test_non_string_timestamp_tolerated(self) -> None:
+        # A numeric timestamp must not crash the string comparisons; the entry's content is still parsed.
+        scanner = EffortScanner('')
+        scanner.process_entry({
+            'timestamp': 1759000000,
+            'message': {'content': '<local-command-stdout>Set effort level to high</local-command-stdout>'},
+        })
+        assert scanner.effort == 'high'
+        assert scanner.latest_ts == ''
+
 
 class TestScanTranscriptEffort:
     def test_effort_command(self, tmp_path: Path) -> None:
@@ -272,6 +282,17 @@ class TestScanTranscriptEffort:
         transcript.write_text('\n'.join(lines) + '\n')
         effort, _, _ = scan_transcript_effort(str(transcript))
         assert effort is None
+
+    def test_numeric_timestamp_does_not_crash(self, tmp_path: Path) -> None:
+        transcript = tmp_path / 'session.jsonl'
+        entry = json.dumps({
+            'type': 'user',
+            'timestamp': 1759000000,
+            'message': {'content': '<local-command-stdout>Set effort level to high</local-command-stdout>'},
+        })
+        transcript.write_text(entry + '\n')
+        effort, _, _ = scan_transcript_effort(str(transcript))
+        assert effort == 'high'
 
 
 class TestResolveEffort:

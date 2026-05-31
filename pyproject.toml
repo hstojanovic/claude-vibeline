@@ -115,6 +115,7 @@ split-on-trailing-comma = false
 ]
 "tests/*" = [
     "INP001",   # No __init__.py needed (not a package).
+    "PLC1901",  # Allow explicit equality to empty string in assertions.
     "PLC2701",  # Allow private name imports (testing internals).
     "PLR0904",  # Allow many public methods (large test classes).
     "PLR6301",  # Allow methods that don't use self (test organization).

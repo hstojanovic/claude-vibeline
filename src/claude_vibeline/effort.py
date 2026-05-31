@@ -133,6 +133,9 @@ class EffortScanner:
 
     def process_entry(self, entry: dict[str, Any]) -> None:
         ts = entry.get('timestamp', '')
+        if not isinstance(ts, str):
+            # A non-string timestamp (e.g. numeric) would raise TypeError in the comparisons below.
+            ts = ''
         if ts and self.since_ts and ts <= self.since_ts:
             self.done = True
             return

@@ -146,6 +146,15 @@ class TestReadUserTimestamps:
         timestamps, _ = read_user_timestamps(str(transcript))
         assert timestamps == []
 
+    def test_user_entry_with_numeric_timestamp(self, tmp_path: Path) -> None:
+        # A non-string timestamp must be skipped gracefully, not raise TypeError out of the parse.
+        transcript = tmp_path / 'session.jsonl'
+        entry = json.dumps({'type': 'user', 'timestamp': 1759000000, 'message': {'content': 'hi'}})
+        transcript.write_text(entry + '\n')
+        timestamps, last_user_idx = read_user_timestamps(str(transcript))
+        assert timestamps == []
+        assert last_user_idx is None
+
 
 class TestHasCacheGap:
     def test_no_gap(self) -> None:
