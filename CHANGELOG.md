@@ -8,12 +8,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-06-08
+
 ### Added
 
 - Add Opus 4.8 effort-level support (`low`/`medium`/`high`/`xhigh`/`max`, same set as Opus 4.7); the effort indicator now renders for Opus 4.8 instead of being hidden
 
 ### Fixed
 
+- Degrade gracefully when a transcript entry carries a non-string timestamp, instead of raising `TypeError` during effort resolution
 - Keep the usage staleness marker (`≥`) shown for as long as cached `--usage-api` data is served after a failed refresh; it previously appeared for a single render and then vanished while the same stale numbers kept showing
 - Pick up a newly-written OAuth credential on the next render when no token was present, instead of staying on the pending placeholder for up to 60 seconds
 
@@ -121,7 +124,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Add `--currency` option for extra usage currency symbol (default: `€`)
 - Add `--debug` flag to log each statusline output to a platform-specific log file
 
-[Unreleased]: https://github.com/hstojanovic/claude-vibeline/compare/3.1.1...HEAD
+[Unreleased]: https://github.com/hstojanovic/claude-vibeline/compare/3.2.0...HEAD
+[3.2.0]: https://github.com/hstojanovic/claude-vibeline/compare/3.1.1...3.2.0
 [3.1.1]: https://github.com/hstojanovic/claude-vibeline/compare/3.1.0...3.1.1
 [3.1.0]: https://github.com/hstojanovic/claude-vibeline/compare/3.0.0...3.1.0
 [3.0.0]: https://github.com/hstojanovic/claude-vibeline/compare/2.0.0...3.0.0
