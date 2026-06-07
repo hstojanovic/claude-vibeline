@@ -37,7 +37,6 @@ dev = [
     "ruff==0.15.16",
     "time-machine==3.2.0",
     "ty==0.0.44",
-    "types-requests>=2.33.0,<2.33.2",
 ]
 
 [project.scripts]
@@ -77,6 +76,7 @@ ignore = [
     "ERA001",   # Bug: flags TODO blocks as commented-out code.
     "FIX002",   # Allow TODO comments.
     "PLR2004",  # Allow unnamed numerical constants.
+    "PLW0717",  # Allow broad try blocks in best-effort I/O paths (paired with narrow excepts).
     "S311",     # Allow random module.
     "S404",     # Allow subprocess module.
     "S603",     # Allow subprocess with shell=False.
