@@ -54,7 +54,7 @@ You don't have to track new releases — the statusline shows an update notifica
 
 ```
 my-project │ Opus 4.8 (xhigh) │ ctx 1M [###-----] 42%
-update available: 2.0.0 → 2.0.1 · uv tool upgrade claude-vibeline
+update available: 3.1.0 → 3.1.1 · uv tool upgrade claude-vibeline
 ```
 
 PyPI is queried on the first render of a new session, and at most once per 24 hours overall. The cached `latest` version is reused on every render in between. Disable with `--no-update`.
@@ -98,6 +98,10 @@ Add to `~/.claude/settings.json`:
 | `--no-update` | Hide update notification |
 | `--debug` | Log each statusline output to debug file |
 
+Context, session, and weekly flags also accept shorter forms: `--no-ctx`; `--no-sess` / `--no-5h`; `--no-week` / `--no-7d`.
+
+Separately, `-v` / `--version` and `-h` / `--help` print the version and usage, then exit.
+
 Example with all API sections enabled:
 
 ```jsonc
@@ -105,7 +109,8 @@ Example with all API sections enabled:
   // ...
   "statusLine": {
     "type": "command",
-    "command": "claude-vibeline --usage-api --opus --sonnet --extra --currency $"
+    "command": "claude-vibeline --usage-api --opus --sonnet --extra --currency $",
+    "refreshIntervalSeconds": 30
   }
 }
 ```
