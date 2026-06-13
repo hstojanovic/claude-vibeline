@@ -24,7 +24,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "cappa==0.31.0",
+    "cappa==0.32.1",
     "platformdirs==4.10.0",
     "requests==2.34.2",
 ]
