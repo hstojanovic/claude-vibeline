@@ -496,6 +496,9 @@ class TestCleanupSessionCache:
 
 
 class TestSupportedEffortsFor:
+    def test_fable_5(self) -> None:
+        assert supported_efforts_for('Fable 5') == {'low', 'medium', 'high', 'xhigh', 'max'}
+
     def test_opus_4_8(self) -> None:
         assert supported_efforts_for('Opus 4.8') == {'low', 'medium', 'high', 'xhigh', 'max'}
 

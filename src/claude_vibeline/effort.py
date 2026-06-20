@@ -22,6 +22,7 @@ EFFORT_AUTO_PREFIX = 'Effort level set to auto'
 CACHE_MAX_AGE = 30 * 86400  # 30 days
 
 SUPPORTED_EFFORTS: dict[str, set[str]] = {
+    'fable 5': {'low', 'medium', 'high', 'xhigh', 'max'},
     'opus 4.8': {'low', 'medium', 'high', 'xhigh', 'max'},
     'opus 4.7': {'low', 'medium', 'high', 'xhigh', 'max'},
     'opus 4.6': {'low', 'medium', 'high', 'max'},
