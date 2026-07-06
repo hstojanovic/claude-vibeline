@@ -8,6 +8,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-07-11
+
 ### Added
 
 - Add Claude Fable 5 effort-level support (`low`/`medium`/`high`/`xhigh`/`max`, same set as Opus 4.8); the effort indicator now renders for Fable 5
@@ -133,7 +135,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Add `--currency` option for extra usage currency symbol (default: `€`)
 - Add `--debug` flag to log each statusline output to a platform-specific log file
 
-[Unreleased]: https://github.com/hstojanovic/claude-vibeline/compare/3.2.0...HEAD
+[Unreleased]: https://github.com/hstojanovic/claude-vibeline/compare/3.3.0...HEAD
+[3.3.0]: https://github.com/hstojanovic/claude-vibeline/compare/3.2.0...3.3.0
 [3.2.0]: https://github.com/hstojanovic/claude-vibeline/compare/3.1.1...3.2.0
 [3.1.1]: https://github.com/hstojanovic/claude-vibeline/compare/3.1.0...3.1.1
 [3.1.0]: https://github.com/hstojanovic/claude-vibeline/compare/3.0.0...3.1.0
