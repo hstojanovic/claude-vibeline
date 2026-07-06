@@ -26,6 +26,7 @@ SUPPORTED_EFFORTS: dict[str, set[str]] = {
     'opus 4.8': {'low', 'medium', 'high', 'xhigh', 'max'},
     'opus 4.7': {'low', 'medium', 'high', 'xhigh', 'max'},
     'opus 4.6': {'low', 'medium', 'high', 'max'},
+    'sonnet 5': {'low', 'medium', 'high', 'xhigh', 'max'},
     'sonnet 4.6': {'low', 'medium', 'high'},
 }
 

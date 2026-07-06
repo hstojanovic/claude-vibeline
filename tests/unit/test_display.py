@@ -554,6 +554,15 @@ class TestModelSection:
         result = model_section('Sonnet 4.6', 'xhigh?')
         assert '(high?)' in result
 
+    def test_sonnet_5_xhigh(self) -> None:
+        result = model_section('Sonnet 5', 'xhigh')
+        assert 'Sonnet 5' in result
+        assert '(xhigh)' in result
+
+    def test_sonnet_5_max(self) -> None:
+        result = model_section('Sonnet 5', 'max')
+        assert '(max)' in result
+
     def test_haiku_skips_effort(self) -> None:
         result = model_section('Haiku 4.5', 'high')
         assert 'Haiku' in result

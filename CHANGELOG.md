@@ -11,6 +11,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 
 - Add Claude Fable 5 effort-level support (`low`/`medium`/`high`/`xhigh`/`max`, same set as Opus 4.8); the effort indicator now renders for Fable 5
+- Add Claude Sonnet 5 effort-level support (`low`/`medium`/`high`/`xhigh`/`max`)
 
 ## [3.2.0] - 2026-06-08
 

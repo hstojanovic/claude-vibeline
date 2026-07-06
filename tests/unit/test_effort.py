@@ -511,6 +511,9 @@ class TestSupportedEffortsFor:
     def test_opus_4_7_with_suffix(self) -> None:
         assert supported_efforts_for('Opus 4.7 (1M context)') == {'low', 'medium', 'high', 'xhigh', 'max'}
 
+    def test_sonnet_5(self) -> None:
+        assert supported_efforts_for('Sonnet 5') == {'low', 'medium', 'high', 'xhigh', 'max'}
+
     def test_sonnet_4_6(self) -> None:
         assert supported_efforts_for('Sonnet 4.6') == {'low', 'medium', 'high'}
 
@@ -538,3 +541,7 @@ class TestRefineEffortForModel:
     def test_xhigh_transcript_on_unsupporting_model_falls_back(self) -> None:
         with mock.patch('claude_vibeline.effort.read_settings_effort', return_value='medium'):
             assert refine_effort_for_model('xhigh', 'Sonnet 4.6') == 'medium?'
+
+    def test_sonnet_5_supports_xhigh_and_max(self) -> None:
+        assert refine_effort_for_model('xhigh', 'Sonnet 5') == 'xhigh'
+        assert refine_effort_for_model('max', 'Sonnet 5') == 'max'
