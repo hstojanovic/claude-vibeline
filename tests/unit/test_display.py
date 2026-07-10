@@ -554,6 +554,10 @@ class TestModelSection:
         result = model_section('Sonnet 4.6', 'xhigh?')
         assert '(high?)' in result
 
+    def test_sonnet_4_6_max(self) -> None:
+        result = model_section('Sonnet 4.6', 'max')
+        assert '(max)' in result
+
     def test_sonnet_5_xhigh(self) -> None:
         result = model_section('Sonnet 5', 'xhigh')
         assert 'Sonnet 5' in result
@@ -573,8 +577,10 @@ class TestModelSection:
         assert 'Opus 4.6' in result
         assert '(high?)' in result
 
-    def test_unsupported_fallback_effort_defaults_to_medium(self) -> None:
-        result = model_section('Sonnet 4.6', 'max?')
+    def test_unrecognized_fallback_effort_defaults_to_medium(self) -> None:
+        # An unrecognized effortLevel (e.g. garbage in settings.json) is neither a known
+        # level nor xhigh, so it degrades to the medium? default instead of rendering verbatim.
+        result = model_section('Sonnet 4.6', 'bogus?')
         assert '(medium?)' in result
 
     def test_1m_context_suffix(self) -> None:

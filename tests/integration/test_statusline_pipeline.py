@@ -221,8 +221,8 @@ class TestMain:
         output = run_main(stdin_data=data, tmp_path=tmp_path)
         assert '(max)' in output
 
-    def test_max_transcript_on_sonnet_falls_back_to_settings(self, tmp_path: Path) -> None:
-        transcript_path, session_id = _effort_transcript('max', tmp_path)
+    def test_xhigh_transcript_on_sonnet_falls_back_to_settings(self, tmp_path: Path) -> None:
+        transcript_path, session_id = _effort_transcript('xhigh', tmp_path)
         data = {
             **STDIN_DATA,
             'transcript_path': transcript_path,
@@ -231,7 +231,7 @@ class TestMain:
         }
         output = run_main(stdin_data=data, tmp_path=tmp_path, settings_effort='high')
         assert '(high?)' in output
-        assert '(max)' not in output
+        assert '(xhigh)' not in output
         assert '(medium?)' not in output
 
     def test_haiku_no_effort(self) -> None:

@@ -515,7 +515,7 @@ class TestSupportedEffortsFor:
         assert supported_efforts_for('Sonnet 5') == {'low', 'medium', 'high', 'xhigh', 'max'}
 
     def test_sonnet_4_6(self) -> None:
-        assert supported_efforts_for('Sonnet 4.6') == {'low', 'medium', 'high'}
+        assert supported_efforts_for('Sonnet 4.6') == {'low', 'medium', 'high', 'max'}
 
     def test_unknown(self) -> None:
         assert supported_efforts_for('Haiku 4.5') is None
@@ -533,7 +533,7 @@ class TestRefineEffortForModel:
 
     def test_unsupported_transcript_falls_back_to_settings(self) -> None:
         with mock.patch('claude_vibeline.effort.read_settings_effort', return_value='xhigh'):
-            assert refine_effort_for_model('max', 'Sonnet 4.6') == 'xhigh?'
+            assert refine_effort_for_model('xhigh', 'Sonnet 4.6') == 'xhigh?'
 
     def test_unsupported_settings_passes_through_for_downstream_degrade(self) -> None:
         assert refine_effort_for_model('xhigh?', 'Sonnet 4.6') == 'xhigh?'
@@ -545,3 +545,6 @@ class TestRefineEffortForModel:
     def test_sonnet_5_supports_xhigh_and_max(self) -> None:
         assert refine_effort_for_model('xhigh', 'Sonnet 5') == 'xhigh'
         assert refine_effort_for_model('max', 'Sonnet 5') == 'max'
+
+    def test_sonnet_4_6_supports_max(self) -> None:
+        assert refine_effort_for_model('max', 'Sonnet 4.6') == 'max'
