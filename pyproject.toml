@@ -33,7 +33,7 @@ dependencies = [
 dev = [
     "pytest==9.1.1",
     "pytest-cov==7.1.0",
-    "responses==0.26.1",
+    "responses==0.26.2",
     "ruff==0.15.21",
     "time-machine==3.2.0",
     "ty==0.0.58",
