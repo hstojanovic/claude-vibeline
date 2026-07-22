@@ -24,13 +24,13 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
       - run: uv tool install pip-audit
       - name: Audit dependencies
         run: uv export --all-groups --all-extras --no-hashes --no-emit-project | pip-audit $IGNORE_VULNS -r /dev/stdin
       - name: Audit build dependencies
         run: uv run --no-project python -c "import tomllib; [print(r) for r in tomllib.load(open('pyproject.toml','rb'))['build-system']['requires']]" | pip-audit $IGNORE_VULNS -r /dev/stdin
-      - uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+      - uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           languages: python
-      - uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+      - uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
