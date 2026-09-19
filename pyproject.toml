@@ -35,7 +35,7 @@ dev = [
     "pytest-cov==7.1.0",
     "responses==0.26.2",
     "ruff==0.15.21",
-    "time-machine==3.2.0",
+    "time-machine==3.5.1",
     "ty==0.0.58",
 ]
 
